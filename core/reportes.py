@@ -4,11 +4,12 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from database.models import SessionLocal, Alumno
-from core.promedios import calcular_promedio_alumno
+from core.promedios import evaluar_condicion_academica
 
 def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
     """
     Genera un boletín académico en formato PDF y lo guarda en la ruta indicada del equipo.
+    Incluye las reglas académicas (Promedio >= 10 e Inasistencias <= 4).
     """
     db = SessionLocal()
     try:
@@ -58,10 +59,10 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
 
         # Datos del Estudiante y Representante
         rep_nombre = f"{alumno.representante.nombre} {alumno.representante.apellido}" if alumno.representante else "N/A"
-        rep_cedula = alumno.representante.cedula if alumno.representante else "N/A"
         rep_telefono = alumno.representante.telefono if alumno.representante else "N/A"
-
         anio_sec = f"{getattr(alumno, 'anio', '1er Año')} - Sección {getattr(alumno, 'seccion', 'A')}"
+        inasistencias = getattr(alumno, 'inasistencias', 0) or 0
+
         info_data = [
             [
                 Paragraph(f"<b>Estudiante:</b> {alumno.nombre} {alumno.apellido}", normal_estilo),
@@ -69,7 +70,7 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
             ],
             [
                 Paragraph(f"<b>Nivel Académico:</b> {anio_sec}", normal_estilo),
-                Paragraph(f"<b>Fecha de Nacimiento:</b> {alumno.fecha_nacimiento or 'N/A'}", normal_estilo)
+                Paragraph(f"<b>Inasistencias Acumuladas:</b> {inasistencias} (Máximo: 4)", normal_estilo)
             ],
             [
                 Paragraph(f"<b>Representante:</b> {rep_nombre}", normal_estilo),
@@ -85,7 +86,7 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
             ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
         ]))
         elementos.append(info_tabla)
-        elementos.append(Spacer(1, 20))
+        elementos.append(Spacer(1, 15))
 
         # Tabla de Calificaciones
         elementos.append(Paragraph("Detalle de Calificaciones", seccion_estilo))
@@ -93,7 +94,7 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
         tabla_datos = [["Materia", "Lapso", "Calificación (0-20)"]]
         for nota in alumno.notas:
             materia_nom = nota.materia.nombre if nota.materia else "Materia Desconocida"
-            tabla_datos.append([materia_nom, str(nota.lapso), f"{nota.calificacion:.2f}"])
+            tabla_datos.append([materia_nom, str(nota.lapso), f"{nota.calificacion:.2f} pts"])
 
         if len(tabla_datos) == 1:
             tabla_datos.append(["Sin notas registradas", "-", "-"])
@@ -114,16 +115,32 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
         elementos.append(notas_tabla)
         elementos.append(Spacer(1, 15))
 
-        # Promedio General
-        promedio = calcular_promedio_alumno(cedula_alumno)
+        # Evaluación de Condición Académica
+        promedio, inasist, estado, motivo = evaluar_condicion_academica(cedula_alumno)
+
+        color_estado = colors.HexColor('#16A34A') if estado == "APROBADO" else colors.HexColor('#DC2626')
+        color_fondo = colors.HexColor('#DCFCE7') if estado == "APROBADO" else colors.HexColor('#FEE2E2')
+
         resumen_data = [
-            [Paragraph("<b>PROMEDIO GENERAL ACUMULADO:</b>", normal_estilo), Paragraph(f"<b>{promedio:.2f} pts</b>", normal_estilo)]
+            [
+                Paragraph("<b>PROMEDIO GENERAL ACUMULADO:</b>", normal_estilo), 
+                Paragraph(f"<b>{promedio:.2f} / 20 pts</b>", normal_estilo)
+            ],
+            [
+                Paragraph("<b>ESTADO ACADÉMICO FINAL:</b>", normal_estilo),
+                Paragraph(f"<font color='{color_estado.hexval()}'><b>{estado}</b></font>", normal_estilo)
+            ],
+            [
+                Paragraph("<b>OBSERVACIÓN OFICIAL:</b>", normal_estilo),
+                Paragraph(f"<i>{motivo}</i>", normal_estilo)
+            ]
         ]
-        resumen_tabla = Table(resumen_data, colWidths=[360, 160])
+
+        resumen_tabla = Table(resumen_data, colWidths=[240, 280])
         resumen_tabla.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E2E8F0')),
+            ('BACKGROUND', (0, 0), (-1, -1), color_fondo),
             ('PADDING', (0, 0), (-1, -1), 8),
-            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
         ]))
         elementos.append(resumen_tabla)
 

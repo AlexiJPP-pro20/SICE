@@ -41,6 +41,7 @@ class Alumno(Base):
     fecha_nacimiento = Column(String(15), nullable=True) # DD-MM-AAAA
     anio = Column(String(20), default="1er Año", nullable=False)
     seccion = Column(String(10), default="A", nullable=False)
+    inasistencias = Column(Integer, default=0, nullable=False)
     id_representante = Column(String(15), ForeignKey('representante.cedula'))
 
     representante = relationship("Representante", back_populates="alumnos")

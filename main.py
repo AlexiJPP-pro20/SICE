@@ -7,7 +7,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database.models import init_db, SessionLocal, Usuario, Alumno
-from core.promedios import obtener_boletin_texto
+from core.promedios import obtener_boletin_texto, evaluar_condicion_academica
 from core.notificaciones import enviar_boletin_correo
 from core.reportes import generar_boletin_pdf
 from core.importador import registrar_alumno_manual, importar_alumnos_excel, generar_plantilla_excel
@@ -24,7 +24,7 @@ class App(ctk.CTk):
 
         # Configuración de ventana
         self.title("SICE - Sistema Integral de Control Estudiantil")
-        self.geometry("1050x700")
+        self.geometry("1100x720")
         
         self.mostrar_login()
 
@@ -155,10 +155,10 @@ class App(ctk.CTk):
         top_bar.grid(row=0, column=0, padx=20, pady=(10, 5), sticky="ew")
         top_bar.grid_columnconfigure(0, weight=1)
 
-        lbl_titulo = ctk.CTkLabel(top_bar, text="Matrícula General de Estudiantes", font=ctk.CTkFont(size=18, weight="bold"))
+        lbl_titulo = ctk.CTkLabel(top_bar, text="Matrícula General y Estatus Académico", font=ctk.CTkFont(size=18, weight="bold"))
         lbl_titulo.grid(row=0, column=0, sticky="w")
 
-        lbl_info = ctk.CTkLabel(top_bar, text="Doble clic en un estudiante para consultar su boletín directamente", text_color="#94A3B8")
+        lbl_info = ctk.CTkLabel(top_bar, text="Reglas: Promedio < 10.0 o Inasistencias > 4 = REPROBADO. Doble clic para abrir boletín.", text_color="#94A3B8")
         lbl_info.grid(row=1, column=0, sticky="w")
 
         # Barra de búsqueda y filtros por nivel
@@ -193,7 +193,7 @@ class App(ctk.CTk):
         table_container.grid_columnconfigure(0, weight=1)
         table_container.grid_rowconfigure(0, weight=1)
 
-        columnas = ("cedula", "nombres", "apellidos", "anio", "seccion", "fec_nac", "rep_cedula", "rep_nombre", "rep_tlf")
+        columnas = ("cedula", "nombres", "apellidos", "anio", "seccion", "inasist", "promedio", "estado", "rep_nombre", "rep_tlf")
         self.tree_alumnos = ttk.Treeview(table_container, columns=columnas, show="headings", selectmode="browse")
 
         self.tree_alumnos.heading("cedula", text="Cédula Alumno")
@@ -201,19 +201,21 @@ class App(ctk.CTk):
         self.tree_alumnos.heading("apellidos", text="Apellidos")
         self.tree_alumnos.heading("anio", text="Año")
         self.tree_alumnos.heading("seccion", text="Sec.")
-        self.tree_alumnos.heading("fec_nac", text="Fecha Nac.")
-        self.tree_alumnos.heading("rep_cedula", text="Cédula Rep.")
+        self.tree_alumnos.heading("inasist", text="Faltas")
+        self.tree_alumnos.heading("promedio", text="Promedio")
+        self.tree_alumnos.heading("estado", text="Condición")
         self.tree_alumnos.heading("rep_nombre", text="Representante")
         self.tree_alumnos.heading("rep_tlf", text="Teléfono Rep.")
 
         self.tree_alumnos.column("cedula", width=105, anchor="center")
-        self.tree_alumnos.column("nombres", width=120, anchor="w")
-        self.tree_alumnos.column("apellidos", width=120, anchor="w")
-        self.tree_alumnos.column("anio", width=80, anchor="center")
-        self.tree_alumnos.column("seccion", width=50, anchor="center")
-        self.tree_alumnos.column("fec_nac", width=95, anchor="center")
-        self.tree_alumnos.column("rep_cedula", width=100, anchor="center")
-        self.tree_alumnos.column("rep_nombre", width=140, anchor="w")
+        self.tree_alumnos.column("nombres", width=110, anchor="w")
+        self.tree_alumnos.column("apellidos", width=110, anchor="w")
+        self.tree_alumnos.column("anio", width=75, anchor="center")
+        self.tree_alumnos.column("seccion", width=45, anchor="center")
+        self.tree_alumnos.column("inasist", width=55, anchor="center")
+        self.tree_alumnos.column("promedio", width=75, anchor="center")
+        self.tree_alumnos.column("estado", width=100, anchor="center")
+        self.tree_alumnos.column("rep_nombre", width=130, anchor="w")
         self.tree_alumnos.column("rep_tlf", width=110, anchor="center")
 
         # Scrollbars
@@ -243,11 +245,13 @@ class App(ctk.CTk):
             alumnos = query.all()
             for alu in alumnos:
                 rep_nom = f"{alu.representante.nombre} {alu.representante.apellido}" if alu.representante else "N/A"
-                rep_ced = alu.representante.cedula if alu.representante else "N/A"
                 rep_tlf = alu.representante.telefono if alu.representante else "N/A"
-                fec_nac = alu.fecha_nacimiento or "-"
                 anio_val = alu.anio or "1er Año"
                 sec_val = alu.seccion or "A"
+                inasist_val = getattr(alu, 'inasistencias', 0) or 0
+
+                # Evaluar promedio y estado
+                prom, inas, estado, _ = evaluar_condicion_academica(alu.cedula)
 
                 match = (
                     not filtro_txt or 
@@ -264,8 +268,9 @@ class App(ctk.CTk):
                         alu.apellido,
                         anio_val,
                         sec_val,
-                        fec_nac,
-                        rep_ced,
+                        str(inasist_val),
+                        f"{prom:.2f} pts",
+                        estado,
                         rep_nom,
                         rep_tlf
                     ))
@@ -368,10 +373,10 @@ class App(ctk.CTk):
         self.m_apellido_alu = ctk.CTkEntry(frame, placeholder_text="Apellidos del Alumno")
         self.m_apellido_alu.grid(row=3, column=1, padx=10, pady=5, sticky="ew")
 
-        # Nivel: Año y Sección
+        # Nivel e Inasistencias
         nivel_container = ctk.CTkFrame(frame, fg_color="transparent")
         nivel_container.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
-        nivel_container.grid_columnconfigure((0, 1), weight=1)
+        nivel_container.grid_columnconfigure((0, 1, 2), weight=1)
 
         lbl_anio = ctk.CTkLabel(nivel_container, text="Año / Grado:")
         lbl_anio.grid(row=0, column=0, padx=5, sticky="w")
@@ -390,6 +395,12 @@ class App(ctk.CTk):
         )
         self.m_seccion.set("A")
         self.m_seccion.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
+
+        lbl_inasist = ctk.CTkLabel(nivel_container, text="Inasistencias:")
+        lbl_inasist.grid(row=0, column=2, padx=5, sticky="w")
+        self.m_inasistencias = ctk.CTkEntry(nivel_container, placeholder_text="0")
+        self.m_inasistencias.insert(0, "0")
+        self.m_inasistencias.grid(row=1, column=2, padx=5, pady=2, sticky="ew")
 
         # 2. Sección Representante
         lbl_sec2 = ctk.CTkLabel(frame, text="Datos del Representante", font=ctk.CTkFont(size=14, weight="bold"), text_color="#3B82F6")
@@ -437,7 +448,7 @@ class App(ctk.CTk):
         lbl_desc = ctk.CTkLabel(
             frame, 
             text="Puedes importar cientos de alumnos al instante mediante un archivo Excel (.xlsx).\n"
-                 "La plantilla incluye Año (1ero a 5to) y Sección para organizar los niveles estudiantiles.",
+                 "Incluye columnas de Año, Sección e Inasistencias para procesar estados académicos.",
             justify="left"
         )
         lbl_desc.grid(row=1, column=0, padx=20, pady=(0, 15), sticky="w")
@@ -516,6 +527,11 @@ class App(ctk.CTk):
         fec_nac = self.m_fec_nac.get().strip()
         anio_alu = self.m_anio.get().strip()
         seccion_alu = self.m_seccion.get().strip()
+        
+        try:
+            inasistencias_val = int(self.m_inasistencias.get().strip() or 0)
+        except ValueError:
+            inasistencias_val = 0
 
         cedula_rep = self.m_cedula_rep.get().strip()
         nombre_rep = self.m_nombre_rep.get().strip()
@@ -544,6 +560,7 @@ class App(ctk.CTk):
             fecha_nacimiento=fec_nac,
             anio=anio_alu,
             seccion=seccion_alu,
+            inasistencias=inasistencias_val,
             cedula_rep=cedula_rep,
             nombre_rep=nombre_rep,
             apellido_rep=apellido_rep,
@@ -562,6 +579,8 @@ class App(ctk.CTk):
             self.m_nombre_alu.delete(0, "end")
             self.m_apellido_alu.delete(0, "end")
             self.m_fec_nac.delete(0, "end")
+            self.m_inasistencias.delete(0, "end")
+            self.m_inasistencias.insert(0, "0")
             self.m_cedula_rep.delete(0, "end")
             self.m_nombre_rep.delete(0, "end")
             self.m_apellido_rep.delete(0, "end")
