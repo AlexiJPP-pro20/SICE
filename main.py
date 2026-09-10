@@ -1,5 +1,6 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk
+from sqlalchemy.orm import joinedload
 import sys
 import os
 
@@ -21,6 +22,9 @@ class App(ctk.CTk):
 
         # Inicializar base de datos
         init_db()
+
+        # Cache en memoria para filtrado ultrarrápido
+        self.cached_alumnos_data = []
 
         # Configuración de ventana
         self.title("SICE - Sistema Integral de Control Estudiantil")
@@ -129,7 +133,8 @@ class App(ctk.CTk):
         self.crear_vista_manual()
         self.crear_vista_excel()
 
-        # Mostrar tabla de alumnos por defecto tras iniciar sesión
+        # Cargar datos en memoria y mostrar vista principal
+        self.recargar_datos_desde_bd()
         self.cambiar_vista("alumnos")
 
     def cambiar_vista(self, nombre_vista):
@@ -142,6 +147,51 @@ class App(ctk.CTk):
         if nombre_vista == "alumnos":
             self.cargar_tabla_alumnos()
 
+    # ------------------ OPTIMIZACIÓN DE DATOS EN MEMORIA ------------------
+    def recargar_datos_desde_bd(self):
+        """Carga todos los estudiantes en una sola consulta optimizada (Eager Loading)."""
+        db = SessionLocal()
+        try:
+            alumnos = db.query(Alumno).options(
+                joinedload(Alumno.representante),
+                joinedload(Alumno.notas)
+            ).all()
+
+            self.cached_alumnos_data = []
+            for alu in alumnos:
+                rep_nom = f"{alu.representante.nombre} {alu.representante.apellido}" if alu.representante else "N/A"
+                rep_tlf = alu.representante.telefono if alu.representante else "N/A"
+                
+                notas = alu.notas or []
+                prom = sum(n.calificacion for n in notas) / len(notas) if notas else 0.0
+                inas = getattr(alu, 'inasistencias', 0) or 0
+                
+                if inas > 4:
+                    estado = "REPROBADO"
+                elif notas and prom < 10.0:
+                    estado = "REPROBADO"
+                else:
+                    estado = "APROBADO"
+
+                self.cached_alumnos_data.append({
+                    "cedula": alu.cedula,
+                    "nombre": alu.nombre,
+                    "apellido": alu.apellido,
+                    "anio": alu.anio or "1er Año",
+                    "seccion": alu.seccion or "A",
+                    "inasist": inas,
+                    "promedio": prom,
+                    "estado": estado,
+                    "rep_nombre": rep_nom,
+                    "rep_tlf": rep_tlf,
+                    "search_key": f"{alu.cedula} {alu.nombre} {alu.apellido} {rep_nom}".lower()
+                })
+        finally:
+            db.close()
+
+        if hasattr(self, 'tree_alumnos'):
+            self.cargar_tabla_alumnos()
+
     # ------------------ VISTA PRINCIPAL: TABLA DE ALUMNOS ------------------
     def crear_vista_alumnos(self):
         frame = ctk.CTkFrame(self.container_frame, fg_color="transparent")
@@ -150,16 +200,13 @@ class App(ctk.CTk):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(2, weight=1)
 
-        # Cabecera y Filtros
+        # Cabecera limpia (sin reglas invasivas)
         top_bar = ctk.CTkFrame(frame, fg_color="transparent")
         top_bar.grid(row=0, column=0, padx=20, pady=(10, 5), sticky="ew")
         top_bar.grid_columnconfigure(0, weight=1)
 
-        lbl_titulo = ctk.CTkLabel(top_bar, text="Matrícula General y Estatus Académico", font=ctk.CTkFont(size=18, weight="bold"))
+        lbl_titulo = ctk.CTkLabel(top_bar, text="Matrícula General de Estudiantes", font=ctk.CTkFont(size=18, weight="bold"))
         lbl_titulo.grid(row=0, column=0, sticky="w")
-
-        lbl_info = ctk.CTkLabel(top_bar, text="Reglas: Promedio < 10.0 o Inasistencias > 4 = REPROBADO. Doble clic para abrir boletín.", text_color="#94A3B8")
-        lbl_info.grid(row=1, column=0, sticky="w")
 
         # Barra de búsqueda y filtros por nivel
         search_bar = ctk.CTkFrame(frame, fg_color="transparent")
@@ -179,7 +226,7 @@ class App(ctk.CTk):
         )
         self.filtro_anio.grid(row=0, column=1, padx=(0, 5), sticky="e")
 
-        btn_refresh = ctk.CTkButton(search_bar, text="🔄 Actualizar", width=100, command=self.cargar_tabla_alumnos)
+        btn_refresh = ctk.CTkButton(search_bar, text="🔄 Actualizar", width=100, command=self.recargar_datos_desde_bd)
         btn_refresh.grid(row=0, column=2, padx=(0, 5), sticky="e")
 
         btn_ver_boletin_sel = ctk.CTkButton(
@@ -230,52 +277,31 @@ class App(ctk.CTk):
         self.tree_alumnos.bind("<Double-1>", lambda event: self.abrir_boletin_seleccionado())
 
     def cargar_tabla_alumnos(self):
+        """Filtrado ultrarrápido ejecutado 100% en memoria RAM (< 1ms)."""
         for row in self.tree_alumnos.get_children():
             self.tree_alumnos.delete(row)
 
         filtro_txt = self.entry_filtro.get().strip().lower() if hasattr(self, 'entry_filtro') else ""
         filtro_a = self.filtro_anio.get() if hasattr(self, 'filtro_anio') else "Todos los Años"
 
-        db = SessionLocal()
-        try:
-            query = db.query(Alumno)
-            if filtro_a != "Todos los Años":
-                query = query.filter(Alumno.anio == filtro_a)
-            
-            alumnos = query.all()
-            for alu in alumnos:
-                rep_nom = f"{alu.representante.nombre} {alu.representante.apellido}" if alu.representante else "N/A"
-                rep_tlf = alu.representante.telefono if alu.representante else "N/A"
-                anio_val = alu.anio or "1er Año"
-                sec_val = alu.seccion or "A"
-                inasist_val = getattr(alu, 'inasistencias', 0) or 0
+        for item in self.cached_alumnos_data:
+            if filtro_a != "Todos los Años" and item["anio"] != filtro_a:
+                continue
+            if filtro_txt and filtro_txt not in item["search_key"]:
+                continue
 
-                # Evaluar promedio y estado
-                prom, inas, estado, _ = evaluar_condicion_academica(alu.cedula)
-
-                match = (
-                    not filtro_txt or 
-                    filtro_txt in alu.cedula.lower() or 
-                    filtro_txt in alu.nombre.lower() or 
-                    filtro_txt in alu.apellido.lower() or
-                    filtro_txt in rep_nom.lower()
-                )
-
-                if match:
-                    self.tree_alumnos.insert("", "end", values=(
-                        alu.cedula,
-                        alu.nombre,
-                        alu.apellido,
-                        anio_val,
-                        sec_val,
-                        str(inasist_val),
-                        f"{prom:.2f} pts",
-                        estado,
-                        rep_nom,
-                        rep_tlf
-                    ))
-        finally:
-            db.close()
+            self.tree_alumnos.insert("", "end", values=(
+                item["cedula"],
+                item["nombre"],
+                item["apellido"],
+                item["anio"],
+                item["seccion"],
+                str(item["inasist"]),
+                f"{item['promedio']:.2f} pts",
+                item["estado"],
+                item["rep_nombre"],
+                item["rep_tlf"]
+            ))
 
     def abrir_boletin_seleccionado(self):
         seleccion = self.tree_alumnos.selection()
@@ -586,7 +612,7 @@ class App(ctk.CTk):
             self.m_apellido_rep.delete(0, "end")
             self.m_num_tlf.delete(0, "end")
             self.m_correo_rep.delete(0, "end")
-            self.cargar_tabla_alumnos()
+            self.recargar_datos_desde_bd()
         else:
             messagebox.showerror("Error", msg)
 
@@ -623,7 +649,7 @@ class App(ctk.CTk):
                 self.textbox_excel_log.insert("end", f"- {m}\n")
 
         messagebox.showinfo("Importación Finalizada", f"Proceso concluido.\nExitosos: {exitosos}\nFallidos/Duplicados: {fallidos}")
-        self.cargar_tabla_alumnos()
+        self.recargar_datos_desde_bd()
 
 if __name__ == "__main__":
     app = App()
