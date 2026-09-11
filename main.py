@@ -29,10 +29,6 @@ class App(ctk.CTk):
         # Cache en memoria para filtrado ultrarrápido
         self.cached_alumnos_data = []
 
-        # Estado del Servidor Web Móvil
-        self.web_server = None
-        self.web_server_thread = None
-        self.web_server_running = False
 
         # Configuración de ventana
         self.title("SICE - Sistema Integral de Control Estudiantil")
@@ -163,52 +159,44 @@ class App(ctk.CTk):
         # Fila flexible para empujar el panel web al fondo
         self.sidebar_frame.grid_rowconfigure(fila_actual + 1, weight=1)
 
-        # Panel de Control del Portal Web Móvil
-        server_box = ctk.CTkFrame(
+        # Panel de Sincronización con la Nube
+        cloud_box = ctk.CTkFrame(
             self.sidebar_frame, 
             fg_color="#0F172A", 
             corner_radius=8, 
             border_width=2, 
             border_color="#334155"
         )
-        server_box.grid(row=fila_actual + 2, column=0, padx=12, pady=(10, 15), sticky="ew")
-        server_box.grid_columnconfigure(0, weight=1)
+        cloud_box.grid(row=fila_actual + 2, column=0, padx=12, pady=(10, 15), sticky="ew")
+        cloud_box.grid_columnconfigure(0, weight=1)
 
-        self.lbl_server_status = ctk.CTkLabel(
-            server_box, 
-            text="Portal Web: Inactivo", 
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#94A3B8"
+        self.lbl_cloud_status = ctk.CTkLabel(
+            cloud_box, 
+            text="☁️ Portal en la Nube", 
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#38BDF8"
         )
-        self.lbl_server_status.grid(row=0, column=0, padx=10, pady=(8, 4))
-
-        self.btn_toggle_server = ctk.CTkButton(
-            server_box, 
-            text="🌐 Iniciar Portal Web", 
-            fg_color="#1E293B", 
-            hover_color="#334155",
-            border_width=2,
-            border_color="#334155",
-            command=self.alternar_servidor_web
-        )
-        self.btn_toggle_server.grid(row=1, column=0, padx=10, pady=4, sticky="ew")
-
-        self.btn_abrir_web = ctk.CTkButton(
-            server_box,
-            text="🔗 Abrir en Navegador",
-            fg_color="#2563EB",
-            hover_color="#1D4ED8",
-            command=self.abrir_portal_en_navegador
-        )
+        self.lbl_cloud_status.grid(row=0, column=0, padx=10, pady=(8, 4))
 
         self.btn_sync_cloud = ctk.CTkButton(
-            server_box,
+            cloud_box,
             text="☁️ Sincronizar Portal Nube",
             fg_color="#0D9488",
             hover_color="#0F766E",
             command=self.iniciar_sincronizacion_nube
         )
-        self.btn_sync_cloud.grid(row=3, column=0, padx=10, pady=(4, 8), sticky="ew")
+        self.btn_sync_cloud.grid(row=1, column=0, padx=10, pady=4, sticky="ew")
+
+        self.btn_abrir_web = ctk.CTkButton(
+            cloud_box,
+            text="🔗 Abrir Portal Web",
+            fg_color="#1E293B",
+            hover_color="#334155",
+            border_width=1,
+            border_color="#475569",
+            command=self.abrir_portal_en_navegador
+        )
+        self.btn_abrir_web.grid(row=2, column=0, padx=10, pady=(2, 8), sticky="ew")
 
         # 2. Contenedor Dinámico
         self.container_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -1054,49 +1042,19 @@ class App(ctk.CTk):
         messagebox.showinfo("Importación Finalizada", f"Proceso concluido.\nExitosos: {exitosos}\nFallidos/Duplicados: {fallidos}")
         self.recargar_datos_desde_bd()
 
-    # ------------------ GESTIÓN DEL PORTAL WEB MÓVIL ------------------
-    def obtener_ip_local(self):
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "127.0.0.1"
-
-    def alternar_servidor_web(self):
-        if not self.web_server_running:
-            import uvicorn
-            from api import app as fastapi_app
-            import threading
-            
-            ip = self.obtener_ip_local()
-            config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
-            self.web_server = uvicorn.Server(config)
-            
-            def run_server():
-                self.web_server.run()
-
-            self.web_server_thread = threading.Thread(target=run_server, daemon=True)
-            self.web_server_thread.start()
-            self.web_server_running = True
-            
-            self.btn_toggle_server.configure(text="🛑 Detener Portal Web", fg_color="#DC2626", hover_color="#B91C1C")
-            self.lbl_server_status.configure(text=f"Móvil: http://{ip}:8000", text_color="#4ADE80")
-            self.btn_abrir_web.grid(row=2, column=0, padx=10, pady=(2, 6), sticky="ew")
-        else:
-            if self.web_server:
-                self.web_server.should_exit = True
-            self.web_server_running = False
-            self.btn_toggle_server.configure(text="🌐 Iniciar Portal Web", fg_color="#1E293B", hover_color="#334155")
-            self.lbl_server_status.configure(text="Portal Web: Inactivo", text_color="#94A3B8")
-            self.btn_abrir_web.grid_remove()
-
+    # ------------------ GESTIÓN DEL PORTAL EN LA NUBE ------------------
     def abrir_portal_en_navegador(self):
         import webbrowser
-        webbrowser.open("http://localhost:8000")
+        import json
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_config.json")
+        portal_url = "https://alexipalacio.pythonanywhere.com"
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    portal_url = json.load(f).get("portal_url", portal_url)
+            except Exception:
+                pass
+        webbrowser.open(portal_url)
 
     def iniciar_sincronizacion_nube(self):
         import json
@@ -1171,8 +1129,6 @@ class App(ctk.CTk):
         threading.Thread(target=sincronizar, daemon=True).start()
 
     def cerrar_aplicacion(self):
-        if self.web_server:
-            self.web_server.should_exit = True
         self.destroy()
 
 if __name__ == "__main__":
