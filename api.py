@@ -1,7 +1,8 @@
 import os
 import sys
+import shutil
 import tempfile
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import joinedload
@@ -9,7 +10,7 @@ from sqlalchemy.orm import joinedload
 # Asegurar importaciones del proyecto
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from database.models import SessionLocal, Alumno
+from database.models import SessionLocal, Alumno, DB_PATH, engine
 from core.promedios import evaluar_condicion_academica
 from core.reportes import generar_boletin_pdf
 
@@ -488,6 +489,37 @@ def descargar_boletin_pdf(cedula: str):
         )
     finally:
         db.close()
+
+SYNC_SECRET_TOKEN = os.environ.get("SYNC_SECRET_TOKEN", "sice_secret_sync_token_2026")
+
+@app.post("/admin/sync-db")
+async def sincronizar_base_datos(
+    file: UploadFile = File(...),
+    x_sync_token: str = Header(None)
+):
+    """Endpoint protegido para sincronizar/reemplazar el archivo sice.db."""
+    if not x_sync_token or x_sync_token != SYNC_SECRET_TOKEN:
+        raise HTTPException(status_code=401, detail="Token de sincronización inválido o no proporcionado.")
+    
+    if not file.filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="Solo se permiten archivos de base de datos (.db).")
+    
+    engine.dispose()
+    temp_dest = DB_PATH + ".incoming"
+    try:
+        with open(temp_dest, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        if os.path.exists(DB_PATH):
+            backup_path = DB_PATH + ".bak"
+            shutil.copy2(DB_PATH, backup_path)
+            
+        shutil.move(temp_dest, DB_PATH)
+        return {"status": "ok", "message": "Base de datos sincronizada exitosamente."}
+    except Exception as e:
+        if os.path.exists(temp_dest):
+            os.remove(temp_dest)
+        raise HTTPException(status_code=500, detail=f"Error durante el reemplazo: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

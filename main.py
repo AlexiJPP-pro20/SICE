@@ -201,6 +201,15 @@ class App(ctk.CTk):
             command=self.abrir_portal_en_navegador
         )
 
+        self.btn_sync_cloud = ctk.CTkButton(
+            server_box,
+            text="☁️ Sincronizar Portal Nube",
+            fg_color="#0D9488",
+            hover_color="#0F766E",
+            command=self.iniciar_sincronizacion_nube
+        )
+        self.btn_sync_cloud.grid(row=3, column=0, padx=10, pady=(4, 8), sticky="ew")
+
         # 2. Contenedor Dinámico
         self.container_frame = ctk.CTkFrame(self, corner_radius=10)
         self.container_frame.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
@@ -811,6 +820,78 @@ class App(ctk.CTk):
     def abrir_portal_en_navegador(self):
         import webbrowser
         webbrowser.open("http://localhost:8000")
+
+    def iniciar_sincronizacion_nube(self):
+        import json
+        import requests
+        import threading
+        from database.models import DB_PATH
+        
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sync_config.json")
+        portal_url = "http://localhost:8000"
+        sync_token = "sice_secret_sync_token_2026"
+        
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    portal_url = cfg.get("portal_url", portal_url).rstrip("/")
+                    sync_token = cfg.get("sync_token", sync_token)
+            except Exception:
+                pass
+                
+        confirmar = messagebox.askyesno(
+            "Sincronizar Portal",
+            f"¿Desea sincronizar la base de datos local con el portal web?\n\nDestino: {portal_url}"
+        )
+        if not confirmar:
+            return
+
+        self.btn_sync_cloud.configure(text="⏳ Sincronizando...", state="disabled")
+
+        def sincronizar():
+            try:
+                if not os.path.exists(DB_PATH):
+                    raise Exception(f"No se encontró el archivo de base de datos en: {DB_PATH}")
+
+                url_endpoint = f"{portal_url}/admin/sync-db"
+                headers = {"x-sync-token": sync_token}
+                
+                with open(DB_PATH, "rb") as f:
+                    files = {"file": ("sice.db", f, "application/octet-stream")}
+                    resp = requests.post(url_endpoint, headers=headers, files=files, timeout=60)
+
+                if resp.status_code == 200:
+                    self.after(0, lambda: messagebox.showinfo(
+                        "Sincronización Exitosa", 
+                        "La base de datos y notas se han sincronizado correctamente con el portal web."
+                    ))
+                elif resp.status_code == 401:
+                    self.after(0, lambda: messagebox.showerror(
+                        "Error de Autenticación",
+                        "El token de sincronización configurado en 'sync_config.json' no coincide con el del servidor."
+                    ))
+                else:
+                    detalle = resp.text
+                    try:
+                        detalle = resp.json().get("detail", detalle)
+                    except Exception:
+                        pass
+                    self.after(0, lambda d=detalle: messagebox.showerror(
+                        "Error en Servidor",
+                        f"El servidor respondió con código {resp.status_code}:\n{d}"
+                    ))
+            except Exception as e:
+                self.after(0, lambda err=str(e): messagebox.showerror(
+                    "Error de Conexión",
+                    f"No se pudo completar la sincronización:\n{err}"
+                ))
+            finally:
+                self.after(0, lambda: self.btn_sync_cloud.configure(
+                    text="☁️ Sincronizar Portal Nube", state="normal"
+                ))
+
+        threading.Thread(target=sincronizar, daemon=True).start()
 
     def cerrar_aplicacion(self):
         if self.web_server:

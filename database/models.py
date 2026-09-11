@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -73,7 +74,8 @@ class Nota(Base):
     profesor = relationship("Profesor")
 
 # Configuración de SQLite local
-engine = create_engine('sqlite:///sice.db')
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sice.db")
+engine = create_engine(f'sqlite:///{DB_PATH}', connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
