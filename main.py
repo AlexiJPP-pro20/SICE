@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media", "Logo_of_SICE.png")
 
-from database.models import init_db, SessionLocal, Usuario, Alumno
+from database.models import init_db, SessionLocal, Usuario, Alumno, Representante, Nota, Materia
 from core.promedios import obtener_boletin_texto, evaluar_condicion_academica
 from core.notificaciones import enviar_boletin_correo
 from core.reportes import generar_boletin_pdf
@@ -347,7 +347,19 @@ class App(ctk.CTk):
             width=110, 
             command=self.abrir_boletin_seleccionado
         )
-        btn_ver_boletin_sel.grid(row=0, column=3, sticky="e")
+        btn_ver_boletin_sel.grid(row=0, column=3, padx=(0, 5), sticky="e")
+
+        btn_editar_sel = ctk.CTkButton(
+            search_bar,
+            text="✏️ Editar Alumno",
+            fg_color="#D97706",
+            hover_color="#B45309",
+            border_width=2,
+            border_color="#F59E0B",
+            width=120,
+            command=self.abrir_modal_editar_alumno
+        )
+        btn_editar_sel.grid(row=0, column=4, sticky="e")
 
         # Contenedor de la Tabla con marco formal de 2px
         table_container = ctk.CTkFrame(
@@ -443,6 +455,271 @@ class App(ctk.CTk):
         self.entry_cedula.delete(0, "end")
         self.entry_cedula.insert(0, str(cedula_seleccionada))
         self.buscar_alumno()
+
+    def abrir_modal_editar_alumno(self):
+        """Abre un modal para editar datos del estudiante y notas con doble verificación de cambios."""
+        seleccion = self.tree_alumnos.selection()
+        if not seleccion:
+            messagebox.showinfo("Selección Requerida", "Por favor, seleccione un estudiante de la tabla para editar.")
+            return
+
+        item = self.tree_alumnos.item(seleccion[0])
+        cedula_sel = str(item['values'][0]).strip()
+
+        db = SessionLocal()
+        try:
+            alumno = db.query(Alumno).options(
+                joinedload(Alumno.representante),
+                joinedload(Alumno.notas).joinedload(Nota.materia)
+            ).filter(Alumno.cedula == cedula_sel).first()
+
+            if not alumno:
+                messagebox.showerror("Error", f"No se encontró el estudiante con cédula {cedula_sel}.")
+                return
+
+            val_originales = {
+                "nombre": alumno.nombre or "",
+                "apellido": alumno.apellido or "",
+                "anio": alumno.anio or "1er Año",
+                "seccion": alumno.seccion or "A",
+                "inasistencias": int(alumno.inasistencias or 0),
+                "rep_nombre": alumno.representante.nombre if alumno.representante else "",
+                "rep_apellido": alumno.representante.apellido if alumno.representante else "",
+                "rep_telefono": alumno.representante.telefono if alumno.representante else "",
+                "rep_correo": alumno.representante.correo if alumno.representante else "",
+                "notas": {n.id_nota: (float(n.calificacion), n.materia.nombre if n.materia else "Materia", n.lapso) for n in alumno.notas}
+            }
+
+            modal = ctk.CTkToplevel(self)
+            modal.title(f"Editar Estudiante - C.I. {alumno.cedula}")
+            modal.geometry("640x680")
+            modal.grab_set()
+            modal.focus()
+
+            modal.grid_columnconfigure(0, weight=1)
+            modal.grid_rowconfigure(1, weight=1)
+
+            header_frame = ctk.CTkFrame(modal, fg_color="#1E293B", corner_radius=0)
+            header_frame.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+            ctk.CTkLabel(
+                header_frame, 
+                text=f"✏️ Edición de Ficha Estudiantil — {alumno.cedula}", 
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color="#F8FAFC"
+            ).pack(padx=20, pady=12, anchor="w")
+
+            scroll_frame = ctk.CTkScrollableFrame(modal, fg_color="transparent")
+            scroll_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+            scroll_frame.grid_columnconfigure((0, 1), weight=1)
+
+            # 1. Datos del Alumno
+            ctk.CTkLabel(scroll_frame, text="1. Datos del Estudiante", font=ctk.CTkFont(size=13, weight="bold"), text_color="#38BDF8").grid(row=0, column=0, columnspan=2, sticky="w", pady=(5, 5))
+
+            ctk.CTkLabel(scroll_frame, text="Nombres:").grid(row=1, column=0, sticky="w", padx=5)
+            ctk.CTkLabel(scroll_frame, text="Apellidos:").grid(row=1, column=1, sticky="w", padx=5)
+            e_nombre = ctk.CTkEntry(scroll_frame)
+            e_nombre.insert(0, val_originales["nombre"])
+            e_nombre.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 10))
+
+            e_apellido = ctk.CTkEntry(scroll_frame)
+            e_apellido.insert(0, val_originales["apellido"])
+            e_apellido.grid(row=2, column=1, sticky="ew", padx=5, pady=(0, 10))
+
+            ctk.CTkLabel(scroll_frame, text="Año / Grado:").grid(row=3, column=0, sticky="w", padx=5)
+            f_sec_inas = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            f_sec_inas.grid(row=3, column=1, rowspan=2, sticky="ew", padx=5)
+            f_sec_inas.grid_columnconfigure((0, 1), weight=1)
+            ctk.CTkLabel(f_sec_inas, text="Sección:").grid(row=0, column=0, sticky="w")
+            ctk.CTkLabel(f_sec_inas, text="Inasistencias:").grid(row=0, column=1, sticky="w", padx=(5, 0))
+
+            opt_anio = ctk.CTkOptionMenu(scroll_frame, values=["1er Año", "2do Año", "3er Año", "4to Año", "5to Año"])
+            opt_anio.set(val_originales["anio"])
+            opt_anio.grid(row=4, column=0, sticky="ew", padx=5, pady=(0, 10))
+
+            opt_seccion = ctk.CTkOptionMenu(f_sec_inas, values=["A", "B", "C", "D", "U"], width=80)
+            opt_seccion.set(val_originales["seccion"])
+            opt_seccion.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+            e_inasist = ctk.CTkEntry(f_sec_inas, width=80)
+            e_inasist.insert(0, str(val_originales["inasistencias"]))
+            e_inasist.grid(row=1, column=1, sticky="ew", padx=(5, 0), pady=(0, 10))
+
+            # 2. Representante
+            ctk.CTkLabel(scroll_frame, text="2. Datos del Representante", font=ctk.CTkFont(size=13, weight="bold"), text_color="#38BDF8").grid(row=5, column=0, columnspan=2, sticky="w", pady=(10, 5))
+
+            ctk.CTkLabel(scroll_frame, text="Nombre Rep.:").grid(row=6, column=0, sticky="w", padx=5)
+            ctk.CTkLabel(scroll_frame, text="Apellido Rep.:").grid(row=6, column=1, sticky="w", padx=5)
+            e_rep_nom = ctk.CTkEntry(scroll_frame)
+            e_rep_nom.insert(0, val_originales["rep_nombre"])
+            e_rep_nom.grid(row=7, column=0, sticky="ew", padx=5, pady=(0, 10))
+
+            e_rep_ape = ctk.CTkEntry(scroll_frame)
+            e_rep_ape.insert(0, val_originales["rep_apellido"])
+            e_rep_ape.grid(row=7, column=1, sticky="ew", padx=5, pady=(0, 10))
+
+            ctk.CTkLabel(scroll_frame, text="Teléfono Rep.:").grid(row=8, column=0, sticky="w", padx=5)
+            ctk.CTkLabel(scroll_frame, text="Correo Electrónico:").grid(row=8, column=1, sticky="w", padx=5)
+            e_rep_tlf = ctk.CTkEntry(scroll_frame)
+            e_rep_tlf.insert(0, val_originales["rep_telefono"])
+            e_rep_tlf.grid(row=9, column=0, sticky="ew", padx=5, pady=(0, 10))
+
+            e_rep_cor = ctk.CTkEntry(scroll_frame)
+            e_rep_cor.insert(0, val_originales["rep_correo"])
+            e_rep_cor.grid(row=9, column=1, sticky="ew", padx=5, pady=(0, 10))
+
+            # 3. Calificaciones
+            entradas_notas = {}
+            if val_originales["notas"]:
+                ctk.CTkLabel(scroll_frame, text="3. Calificaciones Registradas", font=ctk.CTkFont(size=13, weight="bold"), text_color="#38BDF8").grid(row=10, column=0, columnspan=2, sticky="w", pady=(10, 5))
+                f_notas = ctk.CTkFrame(scroll_frame, fg_color="#0F172A", corner_radius=6, border_width=1, border_color="#334155")
+                f_notas.grid(row=11, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+                f_notas.grid_columnconfigure(0, weight=2)
+                f_notas.grid_columnconfigure((1, 2), weight=1)
+
+                ctk.CTkLabel(f_notas, text="Materia", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=0, padx=8, pady=4, sticky="w")
+                ctk.CTkLabel(f_notas, text="Lapso", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=1, padx=8, pady=4)
+                ctk.CTkLabel(f_notas, text="Nota (0-20)", font=ctk.CTkFont(size=11, weight="bold")).grid(row=0, column=2, padx=8, pady=4)
+
+                for r_idx, (id_n, (nota_val, mat_nom, lapso)) in enumerate(val_originales["notas"].items(), start=1):
+                    ctk.CTkLabel(f_notas, text=mat_nom).grid(row=r_idx, column=0, padx=8, pady=2, sticky="w")
+                    ctk.CTkLabel(f_notas, text=f"Lapso {lapso}").grid(row=r_idx, column=1, padx=8, pady=2)
+                    e_n = ctk.CTkEntry(f_notas, width=70, justify="center")
+                    e_n.insert(0, f"{nota_val:.2f}")
+                    e_n.grid(row=r_idx, column=2, padx=8, pady=2)
+                    entradas_notas[id_n] = e_n
+
+            btn_box = ctk.CTkFrame(modal, fg_color="#1E293B", corner_radius=0)
+            btn_box.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
+            btn_box.grid_columnconfigure(0, weight=1)
+
+            def guardar_con_doble_verificacion():
+                nvo_nombre = e_nombre.get().strip()
+                nvo_apellido = e_apellido.get().strip()
+                nvo_anio = opt_anio.get()
+                nvo_seccion = opt_seccion.get()
+                
+                try:
+                    nvo_inasist = int(e_inasist.get().strip())
+                    if nvo_inasist < 0:
+                        raise ValueError()
+                except ValueError:
+                    messagebox.showerror("Dato Inválido", "Las inasistencias deben ser un número entero mayor o igual a 0.", parent=modal)
+                    return
+
+                nvo_rep_nom = e_rep_nom.get().strip()
+                nvo_rep_ape = e_rep_ape.get().strip()
+                nvo_rep_tlf = e_rep_tlf.get().strip()
+                nvo_rep_cor = e_rep_cor.get().strip()
+
+                nuevas_notas = {}
+                for id_n, widget_n in entradas_notas.items():
+                    try:
+                        val_f = float(widget_n.get().strip())
+                        if not (0.0 <= val_f <= 20.0):
+                            raise ValueError()
+                        nuevas_notas[id_n] = val_f
+                    except ValueError:
+                        messagebox.showerror("Nota Inválida", "La calificación debe ser un número entre 0.00 y 20.00.", parent=modal)
+                        return
+
+                cambios = []
+                if nvo_nombre != val_originales["nombre"]:
+                    cambios.append(f"• Nombre: '{val_originales['nombre']}' ➔ '{nvo_nombre}'")
+                if nvo_apellido != val_originales["apellido"]:
+                    cambios.append(f"• Apellido: '{val_originales['apellido']}' ➔ '{nvo_apellido}'")
+                if nvo_anio != val_originales["anio"]:
+                    cambios.append(f"• Año: '{val_originales['anio']}' ➔ '{nvo_anio}'")
+                if nvo_seccion != val_originales["seccion"]:
+                    cambios.append(f"• Sección: '{val_originales['seccion']}' ➔ '{nvo_seccion}'")
+                if nvo_inasist != val_originales["inasistencias"]:
+                    cambios.append(f"• Inasistencias: {val_originales['inasistencias']} ➔ {nvo_inasist}")
+                if nvo_rep_nom != val_originales["rep_nombre"]:
+                    cambios.append(f"• Nombre Rep.: '{val_originales['rep_nombre']}' ➔ '{nvo_rep_nom}'")
+                if nvo_rep_ape != val_originales["rep_apellido"]:
+                    cambios.append(f"• Apellido Rep.: '{val_originales['rep_apellido']}' ➔ '{nvo_rep_ape}'")
+                if nvo_rep_tlf != val_originales["rep_telefono"]:
+                    cambios.append(f"• Teléfono Rep.: '{val_originales['rep_telefono']}' ➔ '{nvo_rep_tlf}'")
+                if nvo_rep_cor != val_originales["rep_correo"]:
+                    cambios.append(f"• Correo Rep.: '{val_originales['rep_correo']}' ➔ '{nvo_rep_cor}'")
+
+                for id_n, nva_calif in nuevas_notas.items():
+                    orig_calif, mat_nom, lapso = val_originales["notas"][id_n]
+                    if abs(nva_calif - orig_calif) > 0.001:
+                        cambios.append(f"• {mat_nom} (Lapso {lapso}): {orig_calif:.2f} ➔ {nva_calif:.2f}")
+
+                if not cambios:
+                    messagebox.showinfo("Sin Cambios", "No se detectó ninguna modificación respecto a los valores actuales.", parent=modal)
+                    return
+
+                lista_cambios_str = "\n".join(cambios)
+                msj_confirmacion = (
+                    f"¿Está completamente seguro(a) de aplicar las siguientes modificaciones?\n\n"
+                    f"Estudiante: {val_originales['nombre']} {val_originales['apellido']} (C.I. {cedula_sel})\n\n"
+                    f"CAMBIOS DETECTADOS:\n{lista_cambios_str}\n\n"
+                    f"⚠️ ADVERTENCIA: Esta acción actualizará los registros oficiales en la base de datos."
+                )
+
+                confirmado = messagebox.askyesno("Doble Verificación - Confirmar Modificación", msj_confirmacion, parent=modal)
+                if not confirmado:
+                    return
+
+                db_write = SessionLocal()
+                try:
+                    alu_up = db_write.query(Alumno).filter(Alumno.cedula == cedula_sel).first()
+                    if not alu_up:
+                        messagebox.showerror("Error", "No se encontró el registro para actualizar.", parent=modal)
+                        return
+
+                    alu_up.nombre = nvo_nombre
+                    alu_up.apellido = nvo_apellido
+                    alu_up.anio = nvo_anio
+                    alu_up.seccion = nvo_seccion
+                    alu_up.inasistencias = nvo_inasist
+
+                    if alu_up.representante:
+                        alu_up.representante.nombre = nvo_rep_nom
+                        alu_up.representante.apellido = nvo_rep_ape
+                        alu_up.representante.telefono = nvo_rep_tlf
+                        alu_up.representante.correo = nvo_rep_cor
+
+                    for id_n, nva_calif in nuevas_notas.items():
+                        nota_up = db_write.query(Nota).filter(Nota.id_nota == id_n).first()
+                        if nota_up:
+                            nota_up.calificacion = nva_calif
+
+                    db_write.commit()
+                    messagebox.showinfo("Modificación Exitosa", "Los datos fueron actualizados correctamente en la base de datos.", parent=modal)
+                    modal.destroy()
+                    self.recargar_datos_desde_bd()
+                except Exception as ex:
+                    db_write.rollback()
+                    messagebox.showerror("Error de Base de Datos", f"No se pudieron guardar los cambios:\n{str(ex)}", parent=modal)
+                finally:
+                    db_write.close()
+
+            btn_cancelar = ctk.CTkButton(
+                btn_box, 
+                text="Cancelar", 
+                fg_color="#334155", 
+                hover_color="#475569", 
+                command=modal.destroy,
+                width=100
+            )
+            btn_cancelar.pack(side="right", padx=(5, 20), pady=12)
+
+            btn_guardar = ctk.CTkButton(
+                btn_box, 
+                text="💾 Guardar Modificaciones", 
+                fg_color="#16A34A", 
+                hover_color="#15803D",
+                font=ctk.CTkFont(weight="bold"),
+                command=guardar_con_doble_verificacion,
+                width=180
+            )
+            btn_guardar.pack(side="right", padx=5, pady=12)
+
+        finally:
+            db.close()
 
     # ------------------ VISTA 2: CONSULTA DE BOLETÍN ------------------
     def crear_vista_boletin(self):
