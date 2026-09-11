@@ -1,11 +1,14 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk
 from sqlalchemy.orm import joinedload
+from PIL import Image
 import sys
 import os
 
 # Asegurar que el directorio raíz está en el path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media", "Logo_of_SICE.png")
 
 from database.models import init_db, SessionLocal, Usuario, Alumno
 from core.promedios import obtener_boletin_texto, evaluar_condicion_academica
@@ -26,9 +29,15 @@ class App(ctk.CTk):
         # Cache en memoria para filtrado ultrarrápido
         self.cached_alumnos_data = []
 
+        # Estado del Servidor Web Móvil
+        self.web_server = None
+        self.web_server_thread = None
+        self.web_server_running = False
+
         # Configuración de ventana
         self.title("SICE - Sistema Integral de Control Estudiantil")
         self.geometry("1100x720")
+        self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
         
         self.mostrar_login()
 
@@ -36,8 +45,17 @@ class App(ctk.CTk):
         self.login_frame = ctk.CTkFrame(self, corner_radius=10)
         self.login_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.login_label = ctk.CTkLabel(self.login_frame, text="SICE - Iniciar Sesión", font=ctk.CTkFont(size=20, weight="bold"))
-        self.login_label.pack(pady=20, padx=25)
+        if os.path.exists(LOGO_PATH):
+            try:
+                img_pil = Image.open(LOGO_PATH)
+                self.logo_login_img = ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(90, 90))
+                self.lbl_login_logo = ctk.CTkLabel(self.login_frame, text="", image=self.logo_login_img)
+                self.lbl_login_logo.pack(pady=(20, 5), padx=25)
+            except Exception:
+                pass
+
+        self.login_label = ctk.CTkLabel(self.login_frame, text="Iniciar Sesión", font=ctk.CTkFont(size=20, weight="bold"))
+        self.login_label.pack(pady=(5, 15), padx=25)
 
         self.entry_username = ctk.CTkEntry(self.login_frame, placeholder_text="Usuario", width=220)
         self.entry_username.pack(pady=10, padx=25)
@@ -69,56 +87,119 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # Configuración de estilos Treeview para integración estética
+        # Configuración de estilos Treeview para integración institucional formal
         style = ttk.Style()
         style.theme_use("clam")
         style.configure(
             "Treeview", 
-            background="#1E293B",
-            foreground="#F8FAFC",
-            fieldbackground="#1E293B",
-            rowheight=32,
-            font=("Segoe UI", 10)
+            background="#0F172A",
+            foreground="#E2E8F0",
+            fieldbackground="#0F172A",
+            rowheight=30,
+            font=("Segoe UI", 10),
+            borderwidth=0
         )
         style.configure(
             "Treeview.Heading", 
-            background="#0F172A",
-            foreground="#38BDF8",
-            font=("Segoe UI", 10, "bold")
+            background="#1E293B",
+            foreground="#F8FAFC",
+            relief="flat",
+            font=("Segoe UI", 10, "bold"),
+            padding=(6, 8)
         )
-        style.map("Treeview", background=[('selected', '#2563EB')])
+        style.map("Treeview", 
+                  background=[('selected', '#1E3A8A')],
+                  foreground=[('selected', '#FFFFFF')])
+        style.map("Treeview.Heading",
+                  background=[('active', '#334155')])
 
         # 1. Barra Lateral de Navegación
         self.sidebar_frame = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(5, weight=1)
+        self.sidebar_frame.grid_rowconfigure(6, weight=1)
 
-        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="SICE", font=ctk.CTkFont(size=24, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 15))
+        fila_actual = 0
+        if os.path.exists(LOGO_PATH):
+            try:
+                img_pil = Image.open(LOGO_PATH)
+                self.logo_sidebar_img = ctk.CTkImage(light_image=img_pil, dark_image=img_pil, size=(65, 65))
+                self.lbl_sidebar_logo = ctk.CTkLabel(self.sidebar_frame, text="", image=self.logo_sidebar_img)
+                self.lbl_sidebar_logo.grid(row=fila_actual, column=0, padx=20, pady=(15, 2))
+                fila_actual += 1
+            except Exception:
+                pass
+
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="SICE", font=ctk.CTkFont(size=22, weight="bold"))
+        self.logo_label.grid(row=fila_actual, column=0, padx=20, pady=(0, 15))
+        fila_actual += 1
 
         self.btn_nav_tabla = ctk.CTkButton(
             self.sidebar_frame, text="📋 Matrícula de Alumnos", 
             command=lambda: self.cambiar_vista("alumnos"), anchor="w"
         )
-        self.btn_nav_tabla.grid(row=1, column=0, padx=15, pady=6, sticky="ew")
+        self.btn_nav_tabla.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+        fila_actual += 1
 
         self.btn_nav_boletin = ctk.CTkButton(
             self.sidebar_frame, text="📄 Consulta de Boletín", 
             command=lambda: self.cambiar_vista("boletin"), anchor="w"
         )
-        self.btn_nav_boletin.grid(row=2, column=0, padx=15, pady=6, sticky="ew")
+        self.btn_nav_boletin.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+        fila_actual += 1
 
         self.btn_nav_manual = ctk.CTkButton(
             self.sidebar_frame, text="✍️ Registro Manual", 
             command=lambda: self.cambiar_vista("manual"), anchor="w"
         )
-        self.btn_nav_manual.grid(row=3, column=0, padx=15, pady=6, sticky="ew")
+        self.btn_nav_manual.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+        fila_actual += 1
 
         self.btn_nav_excel = ctk.CTkButton(
             self.sidebar_frame, text="📊 Importar Excel", 
             command=lambda: self.cambiar_vista("excel"), anchor="w"
         )
-        self.btn_nav_excel.grid(row=4, column=0, padx=15, pady=6, sticky="ew")
+        self.btn_nav_excel.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+
+        # Fila flexible para empujar el panel web al fondo
+        self.sidebar_frame.grid_rowconfigure(fila_actual + 1, weight=1)
+
+        # Panel de Control del Portal Web Móvil
+        server_box = ctk.CTkFrame(
+            self.sidebar_frame, 
+            fg_color="#0F172A", 
+            corner_radius=8, 
+            border_width=2, 
+            border_color="#334155"
+        )
+        server_box.grid(row=fila_actual + 2, column=0, padx=12, pady=(10, 15), sticky="ew")
+        server_box.grid_columnconfigure(0, weight=1)
+
+        self.lbl_server_status = ctk.CTkLabel(
+            server_box, 
+            text="Portal Web: Inactivo", 
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#94A3B8"
+        )
+        self.lbl_server_status.grid(row=0, column=0, padx=10, pady=(8, 4))
+
+        self.btn_toggle_server = ctk.CTkButton(
+            server_box, 
+            text="🌐 Iniciar Portal Web", 
+            fg_color="#1E293B", 
+            hover_color="#334155",
+            border_width=2,
+            border_color="#334155",
+            command=self.alternar_servidor_web
+        )
+        self.btn_toggle_server.grid(row=1, column=0, padx=10, pady=4, sticky="ew")
+
+        self.btn_abrir_web = ctk.CTkButton(
+            server_box,
+            text="🔗 Abrir en Navegador",
+            fg_color="#2563EB",
+            hover_color="#1D4ED8",
+            command=self.abrir_portal_en_navegador
+        )
 
         # 2. Contenedor Dinámico
         self.container_frame = ctk.CTkFrame(self, corner_radius=10)
@@ -213,7 +294,13 @@ class App(ctk.CTk):
         search_bar.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
         search_bar.grid_columnconfigure(0, weight=1)
 
-        self.entry_filtro = ctk.CTkEntry(search_bar, placeholder_text="Filtrar por cédula, nombre o apellido...")
+        self.entry_filtro = ctk.CTkEntry(
+            search_bar, 
+            placeholder_text="Filtrar por cédula, nombre o apellido...",
+            border_width=2,
+            border_color="#334155",
+            fg_color="#0F172A"
+        )
         self.entry_filtro.grid(row=0, column=0, padx=(0, 10), sticky="ew")
         self.entry_filtro.bind("<KeyRelease>", lambda event: self.cargar_tabla_alumnos())
 
@@ -222,20 +309,45 @@ class App(ctk.CTk):
             search_bar, 
             values=["Todos los Años", "1er Año", "2do Año", "3er Año", "4to Año", "5to Año"],
             width=130,
+            fg_color="#1E293B",
+            button_color="#334155",
+            button_hover_color="#475569",
             command=lambda x: self.cargar_tabla_alumnos()
         )
         self.filtro_anio.grid(row=0, column=1, padx=(0, 5), sticky="e")
 
-        btn_refresh = ctk.CTkButton(search_bar, text="🔄 Actualizar", width=100, command=self.recargar_datos_desde_bd)
+        btn_refresh = ctk.CTkButton(
+            search_bar, 
+            text="🔄 Actualizar", 
+            width=100, 
+            border_width=2,
+            border_color="#334155",
+            fg_color="#1E293B",
+            hover_color="#334155",
+            command=self.recargar_datos_desde_bd
+        )
         btn_refresh.grid(row=0, column=2, padx=(0, 5), sticky="e")
 
         btn_ver_boletin_sel = ctk.CTkButton(
-            search_bar, text="📄 Ver Boletín", fg_color="#2563EB", hover_color="#1D4ED8", width=110, command=self.abrir_boletin_seleccionado
+            search_bar, 
+            text="📄 Ver Boletín", 
+            fg_color="#1E3A8A", 
+            hover_color="#1D4ED8", 
+            border_width=2,
+            border_color="#2563EB",
+            width=110, 
+            command=self.abrir_boletin_seleccionado
         )
         btn_ver_boletin_sel.grid(row=0, column=3, sticky="e")
 
-        # Contenedor de la Tabla (Treeview)
-        table_container = ctk.CTkFrame(frame, fg_color="#1E293B", corner_radius=8)
+        # Contenedor de la Tabla con marco formal de 2px
+        table_container = ctk.CTkFrame(
+            frame, 
+            fg_color="#0F172A", 
+            corner_radius=6, 
+            border_width=2, 
+            border_color="#334155"
+        )
         table_container.grid(row=2, column=0, padx=20, pady=(10, 15), sticky="nsew")
         table_container.grid_columnconfigure(0, weight=1)
         table_container.grid_rowconfigure(0, weight=1)
@@ -276,6 +388,10 @@ class App(ctk.CTk):
 
         self.tree_alumnos.bind("<Double-1>", lambda event: self.abrir_boletin_seleccionado())
 
+        # Configuración de filas alternadas formales
+        self.tree_alumnos.tag_configure("fila_par", background="#0F172A")
+        self.tree_alumnos.tag_configure("fila_impar", background="#182234")
+
     def cargar_tabla_alumnos(self):
         """Filtrado ultrarrápido ejecutado 100% en memoria RAM (< 1ms)."""
         for row in self.tree_alumnos.get_children():
@@ -284,12 +400,13 @@ class App(ctk.CTk):
         filtro_txt = self.entry_filtro.get().strip().lower() if hasattr(self, 'entry_filtro') else ""
         filtro_a = self.filtro_anio.get() if hasattr(self, 'filtro_anio') else "Todos los Años"
 
-        for item in self.cached_alumnos_data:
+        for idx, item in enumerate(self.cached_alumnos_data):
             if filtro_a != "Todos los Años" and item["anio"] != filtro_a:
                 continue
             if filtro_txt and filtro_txt not in item["search_key"]:
                 continue
 
+            tag_fila = "fila_par" if idx % 2 == 0 else "fila_impar"
             self.tree_alumnos.insert("", "end", values=(
                 item["cedula"],
                 item["nombre"],
@@ -301,7 +418,7 @@ class App(ctk.CTk):
                 item["estado"],
                 item["rep_nombre"],
                 item["rep_tlf"]
-            ))
+            ), tags=(tag_fila,))
 
     def abrir_boletin_seleccionado(self):
         seleccion = self.tree_alumnos.selection()
@@ -651,6 +768,56 @@ class App(ctk.CTk):
         messagebox.showinfo("Importación Finalizada", f"Proceso concluido.\nExitosos: {exitosos}\nFallidos/Duplicados: {fallidos}")
         self.recargar_datos_desde_bd()
 
+    # ------------------ GESTIÓN DEL PORTAL WEB MÓVIL ------------------
+    def obtener_ip_local(self):
+        import socket
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except Exception:
+            return "127.0.0.1"
+
+    def alternar_servidor_web(self):
+        if not self.web_server_running:
+            import uvicorn
+            from api import app as fastapi_app
+            import threading
+            
+            ip = self.obtener_ip_local()
+            config = uvicorn.Config(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
+            self.web_server = uvicorn.Server(config)
+            
+            def run_server():
+                self.web_server.run()
+
+            self.web_server_thread = threading.Thread(target=run_server, daemon=True)
+            self.web_server_thread.start()
+            self.web_server_running = True
+            
+            self.btn_toggle_server.configure(text="🛑 Detener Portal Web", fg_color="#DC2626", hover_color="#B91C1C")
+            self.lbl_server_status.configure(text=f"Móvil: http://{ip}:8000", text_color="#4ADE80")
+            self.btn_abrir_web.grid(row=2, column=0, padx=10, pady=(2, 6), sticky="ew")
+        else:
+            if self.web_server:
+                self.web_server.should_exit = True
+            self.web_server_running = False
+            self.btn_toggle_server.configure(text="🌐 Iniciar Portal Web", fg_color="#1E293B", hover_color="#334155")
+            self.lbl_server_status.configure(text="Portal Web: Inactivo", text_color="#94A3B8")
+            self.btn_abrir_web.grid_remove()
+
+    def abrir_portal_en_navegador(self):
+        import webbrowser
+        webbrowser.open("http://localhost:8000")
+
+    def cerrar_aplicacion(self):
+        if self.web_server:
+            self.web_server.should_exit = True
+        self.destroy()
+
 if __name__ == "__main__":
     app = App()
     app.mainloop()
+

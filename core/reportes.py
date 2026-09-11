@@ -1,8 +1,9 @@
 import os
+from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
 from database.models import SessionLocal, Alumno
 from core.promedios import evaluar_condicion_academica
 
@@ -32,7 +33,7 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
             parent=estilos['Heading1'],
             fontSize=16,
             alignment=1, # Centrado
-            spaceAfter=15,
+            spaceAfter=10,
             textColor=colors.HexColor('#1E293B')
         )
         subtitulo_estilo = ParagraphStyle(
@@ -40,8 +41,17 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
             parent=estilos['Normal'],
             fontSize=11,
             alignment=1,
-            spaceAfter=20,
+            spaceAfter=5,
             textColor=colors.HexColor('#475569')
+        )
+        
+        fecha_estilo = ParagraphStyle(
+            'Fecha',
+            parent=estilos['Normal'],
+            fontSize=9,
+            alignment=2, # Derecha
+            spaceAfter=15,
+            textColor=colors.HexColor('#64748B')
         )
         seccion_estilo = ParagraphStyle(
             'Seccion',
@@ -52,9 +62,31 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
         )
         normal_estilo = estilos['Normal']
 
-        # Cabecera institucional
-        elementos.append(Paragraph("LICEO GRAN CACIQUE GUAICAIPURO", titulo_estilo))
-        elementos.append(Paragraph("SISTEMA INTEGRAL DE CONTROL ESTUDIANTIL (SICE)<br/><b>BOLETÍN OFICIAL DE CALIFICACIONES</b>", subtitulo_estilo))
+        # Cabecera institucional con Logo
+        fecha_actual = datetime.now().strftime("%d/%m/%Y %H:%M")
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "media", "Logo_of_SICE.png")
+
+        titulo_p = Paragraph("LICEO GRAN CACIQUE GUAICAIPURO", titulo_estilo)
+        subtitulo_p = Paragraph("SISTEMA INTEGRAL DE CONTROL ESTUDIANTIL (SICE)<br/><b>BOLETÍN OFICIAL DE CALIFICACIONES</b>", subtitulo_estilo)
+
+        if os.path.exists(logo_path):
+            try:
+                img_logo = RLImage(logo_path, width=60, height=60)
+                cabecera_data = [[img_logo, [titulo_p, subtitulo_p]]]
+                cabecera_tabla = Table(cabecera_data, colWidths=[70, 450])
+                cabecera_tabla.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+                ]))
+                elementos.append(cabecera_tabla)
+            except Exception:
+                elementos.append(titulo_p)
+                elementos.append(subtitulo_p)
+        else:
+            elementos.append(titulo_p)
+            elementos.append(subtitulo_p)
+
+        elementos.append(Paragraph(f"Fecha de Emisión: {fecha_actual}", fecha_estilo))
         elementos.append(Spacer(1, 10))
 
         # Datos del Estudiante y Representante
@@ -143,6 +175,24 @@ def generar_boletin_pdf(cedula_alumno: str, ruta_destino: str) -> bool:
             ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
         ]))
         elementos.append(resumen_tabla)
+        elementos.append(Spacer(1, 40))
+
+        # Firmas
+        firmas_data = [
+            ["___________________________", "___________________________"],
+            ["Firma del Director(a)", "Firma del Representante"],
+            ["Sello de la Institución", ""]
+        ]
+        firmas_tabla = Table(firmas_data, colWidths=[260, 260])
+        firmas_tabla.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#475569')),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 5), # Espacio debajo de la línea
+        ]))
+        elementos.append(firmas_tabla)
 
         doc.build(elementos)
         return True
