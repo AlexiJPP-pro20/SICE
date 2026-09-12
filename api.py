@@ -20,12 +20,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# SECURITY: Restringir origins en producción; "*" sólo es aceptable en red local.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Sync-Token"],
 )
 
 HTML_PORTAL = """<!DOCTYPE html>
@@ -309,6 +310,14 @@ HTML_PORTAL = """<!DOCTYPE html>
     </div>
 
     <script>
+        // Whitelist: V- o E- seguido de 6-8 dígitos (cédulas venezolanas)
+        const CEDULA_RE = /^[VEve]-?\d{6,8}$/;
+
+        // Escapa texto plano para insertar como nodo de texto (anti-XSS)
+        function setText(id, value) {
+            document.getElementById(id).textContent = String(value ?? '');
+        }
+
         async function buscarEstudiante() {
             const input = document.getElementById('cedula');
             let cedula = input.value.trim().toUpperCase();
@@ -320,7 +329,14 @@ HTML_PORTAL = """<!DOCTYPE html>
             resultCard.style.display = 'none';
 
             if (!cedula) {
-                errorDiv.innerText = 'Por favor ingresa la cédula del estudiante.';
+                errorDiv.textContent = 'Por favor ingresa la cédula del estudiante.';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            // Validación client-side: rechaza formatos inválidos antes de enviar
+            if (!CEDULA_RE.test(cedula)) {
+                errorDiv.textContent = 'Formato de cédula inválido. Usa: V-12345678';
                 errorDiv.style.display = 'block';
                 return;
             }
@@ -333,7 +349,8 @@ HTML_PORTAL = """<!DOCTYPE html>
 
                 if (!res.ok) {
                     const data = await res.json();
-                    errorDiv.innerText = data.detail || 'Estudiante no encontrado en el sistema.';
+                    // textContent evita que detail malicioso inyecte HTML
+                    errorDiv.textContent = data.detail || 'Estudiante no encontrado en el sistema.';
                     errorDiv.style.display = 'block';
                     return;
                 }
@@ -342,44 +359,68 @@ HTML_PORTAL = """<!DOCTYPE html>
                 mostrarResultado(data);
             } catch (err) {
                 loadingDiv.style.display = 'none';
-                errorDiv.innerText = 'Error de conexión con el servidor escolar.';
+                errorDiv.textContent = 'Error de conexión con el servidor escolar.';
                 errorDiv.style.display = 'block';
             }
         }
 
         function mostrarResultado(data) {
-            document.getElementById('res-nombre').innerText = `${data.nombre} ${data.apellido}`;
-            document.getElementById('res-cedula').innerText = `C.I. ${data.cedula}`;
-            document.getElementById('res-nivel').innerText = `${data.anio} - Sec. ${data.seccion}`;
-            document.getElementById('res-inasist').innerText = `${data.inasistencias} faltas`;
-            document.getElementById('res-promedio').innerText = `${data.promedio.toFixed(2)} pts`;
-            document.getElementById('res-rep').innerText = data.representante.nombre || 'No asignado';
+            // Todos los valores de la API se insertan como texto, nunca como HTML
+            setText('res-nombre', `${data.nombre} ${data.apellido}`);
+            setText('res-cedula', `C.I. ${data.cedula}`);
+            setText('res-nivel', `${data.anio} - Sec. ${data.seccion}`);
+            setText('res-inasist', `${data.inasistencias} faltas`);
+            setText('res-promedio', `${data.promedio.toFixed(2)} pts`);
+            setText('res-rep', data.representante?.nombre || 'No asignado');
 
+            // Badge: construido con DOM, no con innerHTML+datos externos
             const badgeDiv = document.getElementById('res-badge');
-            if (data.estado === 'APROBADO') {
-                badgeDiv.innerHTML = '<span class="badge badge-aprobado">APROBADO</span>';
-            } else {
-                badgeDiv.innerHTML = '<span class="badge badge-reprobado">REPROBADO</span>';
-            }
+            badgeDiv.innerHTML = '';
+            const span = document.createElement('span');
+            const aprobado = data.estado === 'APROBADO';
+            span.className = aprobado ? 'badge badge-aprobado' : 'badge badge-reprobado';
+            span.textContent = aprobado ? 'APROBADO' : 'REPROBADO';
+            badgeDiv.appendChild(span);
 
+            // Tabla de notas: cada celda construida con textContent
             const tbody = document.getElementById('res-notas');
             tbody.innerHTML = '';
 
             if (data.notas && data.notas.length > 0) {
                 data.notas.forEach(n => {
                     const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td>${n.materia}</td>
-                        <td class="text-center">${n.lapso}</td>
-                        <td class="text-center"><b>${n.calificacion.toFixed(2)}</b></td>
-                    `;
+
+                    const tdMateria = document.createElement('td');
+                    tdMateria.textContent = n.materia;
+
+                    const tdLapso = document.createElement('td');
+                    tdLapso.className = 'text-center';
+                    tdLapso.textContent = n.lapso;
+
+                    const tdNota = document.createElement('td');
+                    tdNota.className = 'text-center';
+                    const b = document.createElement('b');
+                    b.textContent = Number(n.calificacion).toFixed(2);
+                    tdNota.appendChild(b);
+
+                    tr.appendChild(tdMateria);
+                    tr.appendChild(tdLapso);
+                    tr.appendChild(tdNota);
                     tbody.appendChild(tr);
                 });
             } else {
-                tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="color: #94A3B8;">Sin calificaciones registradas</td></tr>';
+                const tr = document.createElement('tr');
+                const td = document.createElement('td');
+                td.colSpan = 3;
+                td.className = 'text-center';
+                td.style.color = '#94A3B8';
+                td.textContent = 'Sin calificaciones registradas';
+                tr.appendChild(td);
+                tbody.appendChild(tr);
             }
 
-            document.getElementById('btn-descargar-pdf').href = `/api/v1/boletin/${encodeURIComponent(data.cedula)}`;
+            document.getElementById('btn-descargar-pdf').href =
+                `/api/v1/boletin/${encodeURIComponent(data.cedula)}`;
             document.getElementById('resultado-card').style.display = 'block';
         }
 
@@ -408,9 +449,21 @@ def health_check():
     finally:
         db.close()
 
+import re as _re
+
+_CEDULA_RE = _re.compile(r'^[VEve]-?\d{6,8}$')
+
+def _normalizar_cedula(cedula: str) -> str:
+    """Extrae solo los dígitos de una cédula ya validada con _CEDULA_RE."""
+    return _re.sub(r'[^\d]', '', cedula)
+
 @app.get("/api/v1/estudiante/{cedula}")
 def obtener_estudiante(cedula: str):
     """Consulta los datos académicos de un estudiante mediante su cédula."""
+    # Validación server-side: whitelist estricta antes de tocar la BD
+    if not _CEDULA_RE.match(cedula):
+        raise HTTPException(status_code=400, detail="Formato de cédula inválido.")
+
     db = SessionLocal()
     try:
         alumno = db.query(Alumno).options(
@@ -419,12 +472,21 @@ def obtener_estudiante(cedula: str):
         ).filter(Alumno.cedula == cedula).first()
 
         if not alumno:
-            # Búsqueda tolerante sin prefijo
-            cedula_limpia = cedula.replace("V-", "").replace("E-", "").replace("V", "").replace("E", "").strip()
+            # Búsqueda tolerante sin prefijo: solo dígitos ya validados
+            cedula_limpia = _normalizar_cedula(cedula)
+            # Comparación exacta por número, sin LIKE con wildcard abierto
             alumno = db.query(Alumno).options(
                 joinedload(Alumno.representante),
                 joinedload(Alumno.notas)
-            ).filter(Alumno.cedula.like(f"%{cedula_limpia}")).first()
+            ).filter(
+                Alumno.cedula.in_([
+                    cedula_limpia,
+                    f"V-{cedula_limpia}",
+                    f"E-{cedula_limpia}",
+                    f"V{cedula_limpia}",
+                    f"E{cedula_limpia}",
+                ])
+            ).first()
 
         if not alumno:
             raise HTTPException(status_code=404, detail="Estudiante no encontrado.")
@@ -465,18 +527,32 @@ def obtener_estudiante(cedula: str):
 @app.get("/api/v1/boletin/{cedula}")
 def descargar_boletin_pdf(cedula: str):
     """Genera al vuelo y descarga el boletín académico oficial en PDF."""
+    # Validación idéntica a /estudiante/
+    if not _CEDULA_RE.match(cedula):
+        raise HTTPException(status_code=400, detail="Formato de cédula inválido.")
+
     db = SessionLocal()
     try:
         alumno = db.query(Alumno).filter(Alumno.cedula == cedula).first()
         if not alumno:
-            cedula_limpia = cedula.replace("V-", "").replace("E-", "").replace("V", "").replace("E", "").strip()
-            alumno = db.query(Alumno).filter(Alumno.cedula.like(f"%{cedula_limpia}")).first()
+            cedula_limpia = _normalizar_cedula(cedula)
+            alumno = db.query(Alumno).filter(
+                Alumno.cedula.in_([
+                    cedula_limpia,
+                    f"V-{cedula_limpia}",
+                    f"E-{cedula_limpia}",
+                    f"V{cedula_limpia}",
+                    f"E{cedula_limpia}",
+                ])
+            ).first()
 
         if not alumno:
             raise HTTPException(status_code=404, detail="Estudiante no encontrado.")
 
         temp_dir = tempfile.gettempdir()
-        pdf_path = os.path.join(temp_dir, f"Boletin_{alumno.cedula}.pdf")
+        # Nombre de archivo sanitizado: solo caracteres alfanuméricos del cedula
+        cedula_safe = _re.sub(r'[^\w-]', '', alumno.cedula)
+        pdf_path = os.path.join(temp_dir, f"Boletin_{cedula_safe}.pdf")
 
         exito = generar_boletin_pdf(alumno.cedula, pdf_path)
         if not exito or not os.path.exists(pdf_path):
@@ -490,6 +566,8 @@ def descargar_boletin_pdf(cedula: str):
     finally:
         db.close()
 
+# SECURITY: Define SYNC_SECRET_TOKEN como variable de entorno en producción.
+# El fallback hardcodeado es solo para desarrollo local; elimínalo en producción.
 SYNC_SECRET_TOKEN = os.environ.get("SYNC_SECRET_TOKEN", "sice_secret_sync_token_2026")
 
 @app.post("/admin/sync-db")

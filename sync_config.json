@@ -1,4 +1,4 @@
 {
-  "portal_url": "http://localhost:8000",
+  "portal_url": "https://alexipalacio.pythonanywhere.com",
   "sync_token": "sice_secret_sync_token_2026"
 }
