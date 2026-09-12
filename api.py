@@ -29,7 +29,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-Sync-Token"],
 )
 
-HTML_PORTAL = """<!DOCTYPE html>
+HTML_PORTAL = r"""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -251,7 +251,7 @@ HTML_PORTAL = """<!DOCTYPE html>
             <div class="search-box">
                 <label for="cedula">Cédula de Identidad del Alumno</label>
                 <div class="input-group">
-                    <input type="text" id="cedula" placeholder="Ej: V-30123456" autofocus>
+                    <input type="text" id="cedula" placeholder="Ej: 30123456 o V-30123456" autofocus>
                     <button onclick="buscarEstudiante()">🔍 Consultar</button>
                 </div>
             </div>
@@ -310,8 +310,8 @@ HTML_PORTAL = """<!DOCTYPE html>
     </div>
 
     <script>
-        // Whitelist: V- o E- seguido de 6-8 dígitos (cédulas venezolanas)
-        const CEDULA_RE = /^[VEve]-?\d{6,8}$/;
+        // Whitelist: Números de cédula o cédula escolar (4 a 15 dígitos), prefijo V- o E- opcional
+        const CEDULA_RE = /^(?:[VEve]-?)?\d{4,15}$/;
 
         // Escapa texto plano para insertar como nodo de texto (anti-XSS)
         function setText(id, value) {
@@ -336,7 +336,7 @@ HTML_PORTAL = """<!DOCTYPE html>
 
             // Validación client-side: rechaza formatos inválidos antes de enviar
             if (!CEDULA_RE.test(cedula)) {
-                errorDiv.textContent = 'Formato de cédula inválido. Usa: V-12345678';
+                errorDiv.textContent = 'Ingresa una cédula válida (ej. 30123456 o V-30123456).';
                 errorDiv.style.display = 'block';
                 return;
             }
@@ -451,7 +451,7 @@ def health_check():
 
 import re as _re
 
-_CEDULA_RE = _re.compile(r'^[VEve]-?\d{6,8}$')
+_CEDULA_RE = _re.compile(r'^(?:[VEve]-?)?\d{4,15}$')
 
 def _normalizar_cedula(cedula: str) -> str:
     """Extrae solo los dígitos de una cédula ya validada con _CEDULA_RE."""
