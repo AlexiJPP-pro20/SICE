@@ -1,16 +1,21 @@
 import customtkinter as ctk
 from tkinter import filedialog, messagebox, ttk
 from sqlalchemy.orm import joinedload
-from PIL import Image
+from PIL import Image, ImageTk
 import sys
 import os
+import hashlib
+import shutil
+from datetime import datetime
 
 # Asegurar que el directorio raíz está en el path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media", "Logo_of_SICE.png")
+MEDIA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "media")
+LOGO_PATH = os.path.join(MEDIA_DIR, "Logo_of_SICE.png")
+ICO_PATH = os.path.join(MEDIA_DIR, "logo.ico")
 
-from database.models import init_db, SessionLocal, Usuario, Alumno, Representante, Nota, Materia
+from database.models import init_db, SessionLocal, Usuario, Alumno, Representante, Nota, Materia, AuditoriaLog, DB_PATH
 from core.promedios import obtener_boletin_texto, evaluar_condicion_academica
 from core.notificaciones import enviar_boletin_correo
 from core.reportes import generar_boletin_pdf
@@ -29,11 +34,23 @@ class App(ctk.CTk):
         # Cache en memoria para filtrado ultrarrápido
         self.cached_alumnos_data = []
 
-
         # Configuración de ventana
         self.title("SICE - Sistema Integral de Control Estudiantil")
         self.geometry("1100x720")
         self.protocol("WM_DELETE_WINDOW", self.cerrar_aplicacion)
+
+        # Ícono de ventana y barra de tareas
+        if os.path.exists(ICO_PATH):
+            try:
+                self.iconbitmap(ICO_PATH)
+            except Exception:
+                pass
+        elif os.path.exists(LOGO_PATH):
+            try:
+                self._app_icon_img = ImageTk.PhotoImage(Image.open(LOGO_PATH))
+                self.wm_iconphoto(True, self._app_icon_img)
+            except Exception:
+                pass
         
         self.mostrar_login()
 
@@ -67,16 +84,20 @@ class App(ctk.CTk):
 
     def validar_login(self):
         username = self.entry_username.get().strip()
-        password = self.entry_password.get().strip()
+        password_raw = self.entry_password.get().strip()
+        password_hash = hashlib.sha256(password_raw.encode()).hexdigest()
         
         db = SessionLocal()
-        user = db.query(Usuario).filter(Usuario.username == username, Usuario.password == password).first()
-        db.close()
+        user = db.query(Usuario).filter(Usuario.username == username, Usuario.password == password_hash).first()
         
         if user:
+            self.current_user_id = user.id_usuario
+            self.current_user_rol = user.rol
+            db.close()
             self.login_frame.destroy()
             self.mostrar_app_principal()
         else:
+            db.close()
             self.label_error.configure(text="Credenciales inválidas")
 
     def mostrar_app_principal(self):
@@ -155,6 +176,20 @@ class App(ctk.CTk):
             command=lambda: self.cambiar_vista("excel"), anchor="w"
         )
         self.btn_nav_excel.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+        fila_actual += 1
+
+        self.btn_nav_asistencia = ctk.CTkButton(
+            self.sidebar_frame, text="📅 Pase de Lista", 
+            command=lambda: self.cambiar_vista("asistencia"), anchor="w"
+        )
+        self.btn_nav_asistencia.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
+        fila_actual += 1
+
+        self.btn_nav_backup = ctk.CTkButton(
+            self.sidebar_frame, text="💾 Respaldo Local", 
+            command=self.hacer_respaldo, anchor="w", fg_color="#4F46E5", hover_color="#4338CA"
+        )
+        self.btn_nav_backup.grid(row=fila_actual, column=0, padx=15, pady=6, sticky="ew")
 
         # Fila flexible para empujar el panel web al fondo
         self.sidebar_frame.grid_rowconfigure(fila_actual + 1, weight=1)
@@ -210,6 +245,7 @@ class App(ctk.CTk):
         self.crear_vista_boletin()
         self.crear_vista_manual()
         self.crear_vista_excel()
+        self.crear_vista_asistencia()
 
         # Cargar datos en memoria y mostrar vista principal
         self.recargar_datos_desde_bd()
@@ -258,6 +294,7 @@ class App(ctk.CTk):
                     "anio": alu.anio or "1er Año",
                     "seccion": alu.seccion or "A",
                     "inasist": inas,
+                    "inasistencias": inas,
                     "promedio": prom,
                     "estado": estado,
                     "rep_nombre": rep_nom,
@@ -1130,6 +1167,150 @@ class App(ctk.CTk):
 
     def cerrar_aplicacion(self):
         self.destroy()
+
+    # ------------------ RESPALDO LOCAL ------------------
+    def hacer_respaldo(self):
+        if self.current_user_rol != "admin":
+            messagebox.showwarning("Acceso Denegado", "Solo el administrador puede realizar respaldos.")
+            return
+
+        directorio = filedialog.askdirectory(title="Seleccionar carpeta para guardar el respaldo")
+        if not directorio:
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nombre_archivo = f"sice_backup_{timestamp}.db"
+        ruta_destino = os.path.join(directorio, nombre_archivo)
+
+        try:
+            shutil.copy2(DB_PATH, ruta_destino)
+            self.registrar_auditoria("BACKUP", "database", "ALL", f"Respaldo creado: {nombre_archivo}")
+            messagebox.showinfo("Éxito", f"Respaldo creado exitosamente en:\n{ruta_destino}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo crear el respaldo:\n{e}")
+
+    # ------------------ PASE DE LISTA (INASISTENCIAS) ------------------
+    def crear_vista_asistencia(self):
+        self.vista_asistencia = ctk.CTkFrame(self.container_frame, fg_color="transparent")
+        self.vistas["asistencia"] = self.vista_asistencia
+        self.vista_asistencia.grid_columnconfigure(0, weight=1)
+        self.vista_asistencia.grid_rowconfigure(2, weight=1)
+
+        lbl_titulo = ctk.CTkLabel(self.vista_asistencia, text="📅 Pase de Lista (Carga Masiva)", font=ctk.CTkFont(size=24, weight="bold"))
+        lbl_titulo.grid(row=0, column=0, pady=(0, 20), sticky="w")
+
+        filtros_frame = ctk.CTkFrame(self.vista_asistencia)
+        filtros_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+        ctk.CTkLabel(filtros_frame, text="Año:").pack(side="left", padx=(10, 5), pady=10)
+        self.combo_asist_anio = ctk.CTkComboBox(filtros_frame, values=["1er Año", "2do Año", "3er Año", "4to Año", "5to Año"], width=120)
+        self.combo_asist_anio.pack(side="left", padx=(0, 15))
+
+        ctk.CTkLabel(filtros_frame, text="Sección:").pack(side="left", padx=(0, 5))
+        self.combo_asist_seccion = ctk.CTkComboBox(filtros_frame, values=["A", "B", "C", "D"], width=80)
+        self.combo_asist_seccion.pack(side="left", padx=(0, 15))
+
+        btn_filtrar = ctk.CTkButton(filtros_frame, text="🔍 Buscar", command=self.cargar_tabla_asistencia)
+        btn_filtrar.pack(side="left", padx=(10, 10))
+
+        # Tabla de asistencia
+        columnas = ("cedula", "nombre", "inasistencias")
+        self.tabla_asistencia = ttk.Treeview(self.vista_asistencia, columns=columnas, show="headings", style="Treeview")
+        self.tabla_asistencia.heading("cedula", text="Cédula")
+        self.tabla_asistencia.heading("nombre", text="Nombres y Apellidos")
+        self.tabla_asistencia.heading("inasistencias", text="Inasistencias Acum.")
+
+        self.tabla_asistencia.column("cedula", width=100, anchor="center")
+        self.tabla_asistencia.column("nombre", width=300, anchor="w")
+        self.tabla_asistencia.column("inasistencias", width=150, anchor="center")
+
+        scroll_y = ttk.Scrollbar(self.vista_asistencia, orient="vertical", command=self.tabla_asistencia.yview)
+        self.tabla_asistencia.configure(yscrollcommand=scroll_y.set)
+        
+        self.tabla_asistencia.grid(row=2, column=0, sticky="nsew")
+        scroll_y.grid(row=2, column=1, sticky="ns")
+
+        acciones_frame = ctk.CTkFrame(self.vista_asistencia, fg_color="transparent")
+        acciones_frame.grid(row=3, column=0, pady=10, sticky="e")
+
+        btn_agregar_falta = ctk.CTkButton(
+            acciones_frame, text="➕ Agregar Falta (Seleccionados)", 
+            fg_color="#D97706", hover_color="#B45309", 
+            command=self.registrar_falta_masiva
+        )
+        btn_agregar_falta.pack(side="right")
+
+    def cargar_tabla_asistencia(self):
+        anio = self.combo_asist_anio.get()
+        seccion = self.combo_asist_seccion.get()
+        
+        for item in self.tabla_asistencia.get_children():
+            self.tabla_asistencia.delete(item)
+
+        alumnos_filtrados = [
+            a for a in self.cached_alumnos_data
+            if a["anio"] == anio and a["seccion"] == seccion
+        ]
+
+        # Ordenar alfabéticamente
+        alumnos_filtrados.sort(key=lambda x: x["nombre"])
+
+        for alu in alumnos_filtrados:
+            nombre_completo = f"{alu['nombre']} {alu.get('apellido', '')}".strip()
+            self.tabla_asistencia.insert("", "end", values=(
+                alu["cedula"],
+                nombre_completo,
+                alu.get("inasistencias", alu.get("inasist", 0))
+            ))
+
+    def registrar_falta_masiva(self):
+        seleccionados = self.tabla_asistencia.selection()
+        if not seleccionados:
+            messagebox.showwarning("Atención", "Debe seleccionar al menos un alumno de la tabla.")
+            return
+
+        if not messagebox.askyesno("Confirmar", f"¿Sumar 1 inasistencia a los {len(seleccionados)} alumnos seleccionados?"):
+            return
+
+        db = SessionLocal()
+        try:
+            for item in seleccionados:
+                valores = self.tabla_asistencia.item(item, "values")
+                cedula = valores[0]
+                alumno_db = db.query(Alumno).filter(Alumno.cedula == cedula).first()
+                if alumno_db:
+                    alumno_db.inasistencias += 1
+                    self.registrar_auditoria("UPDATE_INASISTENCIA", "alumno", cedula, "Suma +1 inasistencia", session=db)
+            db.commit()
+            messagebox.showinfo("Éxito", "Inasistencias registradas correctamente.")
+            self.recargar_datos_desde_bd()
+            self.cargar_tabla_asistencia()
+        except Exception as e:
+            db.rollback()
+            messagebox.showerror("Error", f"Fallo al registrar faltas: {e}")
+        finally:
+            db.close()
+
+    # ------------------ AUDITORÍA ------------------
+    def registrar_auditoria(self, accion, tabla, registro_id, detalles="", session=None):
+        nuevo_log = AuditoriaLog(
+            usuario_id=getattr(self, 'current_user_id', None),
+            accion=accion,
+            tabla_afectada=tabla,
+            registro_id=registro_id,
+            detalles=detalles
+        )
+        if session:
+            session.add(nuevo_log)
+        else:
+            db = SessionLocal()
+            try:
+                db.add(nuevo_log)
+                db.commit()
+            except Exception:
+                db.rollback()
+            finally:
+                db.close()
 
 if __name__ == "__main__":
     app = App()

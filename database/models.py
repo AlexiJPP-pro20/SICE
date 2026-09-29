@@ -1,5 +1,6 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
+from datetime import datetime
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, DateTime
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
@@ -53,6 +54,7 @@ class Usuario(Base):
     id_usuario = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False)
     password = Column(String(100), nullable=False) # Usar hashes en prod
+    rol = Column(String(20), default="operador", nullable=False)
 
 class Materia(Base):
     __tablename__ = 'materia'
@@ -72,6 +74,16 @@ class Nota(Base):
     alumno = relationship("Alumno", back_populates="notas")
     materia = relationship("Materia")
     profesor = relationship("Profesor")
+
+class AuditoriaLog(Base):
+    __tablename__ = 'auditoria_log'
+    id_log = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id = Column(Integer, nullable=True) # ForeignKey opcional
+    accion = Column(String(50), nullable=False) # ej: 'INSERT', 'UPDATE'
+    tabla_afectada = Column(String(50), nullable=False)
+    registro_id = Column(String(50), nullable=False)
+    detalles = Column(String(200), nullable=True)
+    fecha = Column(DateTime, default=datetime.utcnow)
 
 # Configuración de SQLite local
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sice.db")

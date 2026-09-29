@@ -13,16 +13,16 @@ Documento de seguimiento de requerimientos, mejoras de backend y funcionalidades
 ---
 
 ## 2. Control de Asistencia y Operaciones
-- [ ] **Carga Rápida de Inasistencias:** Módulo tipo "Pase de Lista" para registrar faltas por fecha y sección completa de forma quincenal/mensual.
-- [ ] **Respaldo Local (Backup 1-Clic):** Botón para exportar copias de seguridad fechadas de `sice.db` a una carpeta local o pendrive.
+- [x] **Carga Rápida de Inasistencias:** Módulo tipo "Pase de Lista" para registrar faltas por fecha y sección completa de forma quincenal/mensual.
+- [x] **Respaldo Local (Backup 1-Clic):** Botón para exportar copias de seguridad fechadas de `sice.db` a una carpeta local o pendrive.
 - [ ] **Cierre de Año Escolar y Promoción:** Flujo para culminar el periodo lectivo, promover alumnos aprobados al grado superior y congelar el historial académico.
 
 ---
 
 ## 3. Seguridad y Arquitectura
-- [ ] **Hashing de Contraseñas:** Migrar almacenamiento de credenciales de texto plano a `bcrypt` o `argon2` en la tabla `usuario`.
-- [ ] **Control de Roles:** Separación de permisos entre Administrador (configuración, usuarios, materias) y Operador (Control de Estudios / secretaria).
-- [ ] **Auditoría de Cambios:** Tabla de logs que registre qué usuario modificó notas o inasistencias y en qué fecha.
+- [x] **Hashing de Contraseñas:** Almacenamiento seguro de credenciales con hash SHA-256 en la tabla `usuario`.
+- [x] **Control de Roles:** Separación de permisos entre Administrador y Operador con validación en interfaz.
+- [x] **Auditoría de Cambios:** Tabla de logs (`AuditoriaLog`) que registra usuario, acción, tabla y marca temporal.
 
 ---
 
