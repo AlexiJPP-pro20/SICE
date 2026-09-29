@@ -411,6 +411,10 @@ HTML_PORTAL = r"""<!DOCTYPE html>
                     tdFinal.className = 'text-center';
                     const b = document.createElement('b');
                     b.textContent = n.final !== null ? Number(n.final).toFixed(2) : '-';
+                    if (n.final !== null && n.final < 10) {
+                        tdFinal.style.color = '#F87171';
+                        b.style.fontWeight = 'bold';
+                    }
                     tdFinal.appendChild(b);
 
                     tr.appendChild(tdMateria);
@@ -512,10 +516,15 @@ def obtener_estudiante(cedula: str):
                 notas_por_materia[materia_nom] = {1: None, 2: None, 3: None}
             notas_por_materia[materia_nom][n.lapso] = n.calificacion
             
+        estado_final = estado
         notas_data = []
         for mat, lapsos in notas_por_materia.items():
             valid_notes = [v for v in lapsos.values() if v is not None]
             final = sum(valid_notes) / len(valid_notes) if valid_notes else None
+            
+            if final is not None and final < 10:
+                estado_final = "REPROBADO"
+                
             notas_data.append({
                 "materia": mat,
                 "l1": lapsos[1],
@@ -535,7 +544,7 @@ def obtener_estudiante(cedula: str):
             "seccion": alumno.seccion or "A",
             "inasistencias": inasistencias,
             "promedio": promedio,
-            "estado": estado,
+            "estado": estado_final,
             "motivo": motivo,
             "representante": {
                 "nombre": rep_nombre,
