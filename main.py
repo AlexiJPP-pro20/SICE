@@ -815,8 +815,13 @@ class App(ctk.CTk):
         lbl_sec1 = ctk.CTkLabel(frame, text="Datos del Alumno", font=ctk.CTkFont(size=14, weight="bold"), text_color="#3B82F6")
         lbl_sec1.grid(row=1, column=0, columnspan=2, padx=20, pady=(5, 5), sticky="w")
 
-        self.m_cedula_alu = ctk.CTkEntry(frame, placeholder_text="Cédula Alumno (Ej: V-30123456)")
-        self.m_cedula_alu.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        ced_alu_container = ctk.CTkFrame(frame, fg_color="transparent")
+        ced_alu_container.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        ced_alu_container.grid_columnconfigure(1, weight=1)
+        self.m_tipo_ced_alu = ctk.CTkOptionMenu(ced_alu_container, values=["V", "E"], width=50)
+        self.m_tipo_ced_alu.grid(row=0, column=0, padx=(0, 5), sticky="w")
+        self.m_cedula_alu = ctk.CTkEntry(ced_alu_container, placeholder_text="Número Cédula Alumno")
+        self.m_cedula_alu.grid(row=0, column=1, sticky="ew")
 
         self.m_fec_nac = ctk.CTkEntry(frame, placeholder_text="Fecha Nacimiento (DD-MM-AAAA)")
         self.m_fec_nac.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
@@ -860,8 +865,13 @@ class App(ctk.CTk):
         lbl_sec2 = ctk.CTkLabel(frame, text="Datos del Representante", font=ctk.CTkFont(size=14, weight="bold"), text_color="#3B82F6")
         lbl_sec2.grid(row=5, column=0, columnspan=2, padx=20, pady=(15, 5), sticky="w")
 
-        self.m_cedula_rep = ctk.CTkEntry(frame, placeholder_text="Cédula Representante (Ej: V-15444555)")
-        self.m_cedula_rep.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
+        ced_rep_container = ctk.CTkFrame(frame, fg_color="transparent")
+        ced_rep_container.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
+        ced_rep_container.grid_columnconfigure(1, weight=1)
+        self.m_tipo_ced_rep = ctk.CTkOptionMenu(ced_rep_container, values=["V", "E"], width=50)
+        self.m_tipo_ced_rep.grid(row=0, column=0, padx=(0, 5), sticky="w")
+        self.m_cedula_rep = ctk.CTkEntry(ced_rep_container, placeholder_text="Número Cédula Rep.")
+        self.m_cedula_rep.grid(row=0, column=1, sticky="ew")
 
         # Teléfono con selector de código (0412, 0414, 0424, 0416, 0426)
         tlf_container = ctk.CTkFrame(frame, fg_color="transparent")
@@ -975,7 +985,8 @@ class App(ctk.CTk):
             messagebox.showerror("Error", "Alumno o representante no encontrado.")
 
     def guardar_alumno_manual(self):
-        cedula_alu = self.m_cedula_alu.get().strip()
+        ced_num_alu = self.m_cedula_alu.get().strip()
+        cedula_alu = f"{self.m_tipo_ced_alu.get()}-{ced_num_alu}" if ced_num_alu else ""
         nombre_alu = self.m_nombre_alu.get().strip()
         apellido_alu = self.m_apellido_alu.get().strip()
         fec_nac = self.m_fec_nac.get().strip()
@@ -987,7 +998,8 @@ class App(ctk.CTk):
         except ValueError:
             inasistencias_val = 0
 
-        cedula_rep = self.m_cedula_rep.get().strip()
+        ced_num_rep = self.m_cedula_rep.get().strip()
+        cedula_rep = f"{self.m_tipo_ced_rep.get()}-{ced_num_rep}" if ced_num_rep else ""
         nombre_rep = self.m_nombre_rep.get().strip()
         apellido_rep = self.m_apellido_rep.get().strip()
         
