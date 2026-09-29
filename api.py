@@ -292,8 +292,10 @@ HTML_PORTAL = r"""<!DOCTYPE html>
                 <thead>
                     <tr>
                         <th>Materia</th>
-                        <th class="text-center">Lapso</th>
-                        <th class="text-center">Nota</th>
+                        <th class="text-center">L1</th>
+                        <th class="text-center">L2</th>
+                        <th class="text-center">L3</th>
+                        <th class="text-center">DEF</th>
                     </tr>
                 </thead>
                 <tbody id="res-notas"></tbody>
@@ -393,25 +395,35 @@ HTML_PORTAL = r"""<!DOCTYPE html>
                     const tdMateria = document.createElement('td');
                     tdMateria.textContent = n.materia;
 
-                    const tdLapso = document.createElement('td');
-                    tdLapso.className = 'text-center';
-                    tdLapso.textContent = n.lapso;
+                    const tdL1 = document.createElement('td');
+                    tdL1.className = 'text-center';
+                    tdL1.textContent = n.l1 !== null ? Number(n.l1).toFixed(0) : '-';
 
-                    const tdNota = document.createElement('td');
-                    tdNota.className = 'text-center';
+                    const tdL2 = document.createElement('td');
+                    tdL2.className = 'text-center';
+                    tdL2.textContent = n.l2 !== null ? Number(n.l2).toFixed(0) : '-';
+
+                    const tdL3 = document.createElement('td');
+                    tdL3.className = 'text-center';
+                    tdL3.textContent = n.l3 !== null ? Number(n.l3).toFixed(0) : '-';
+
+                    const tdFinal = document.createElement('td');
+                    tdFinal.className = 'text-center';
                     const b = document.createElement('b');
-                    b.textContent = Number(n.calificacion).toFixed(2);
-                    tdNota.appendChild(b);
+                    b.textContent = n.final !== null ? Number(n.final).toFixed(2) : '-';
+                    tdFinal.appendChild(b);
 
                     tr.appendChild(tdMateria);
-                    tr.appendChild(tdLapso);
-                    tr.appendChild(tdNota);
+                    tr.appendChild(tdL1);
+                    tr.appendChild(tdL2);
+                    tr.appendChild(tdL3);
+                    tr.appendChild(tdFinal);
                     tbody.appendChild(tr);
                 });
             } else {
                 const tr = document.createElement('tr');
                 const td = document.createElement('td');
-                td.colSpan = 3;
+                td.colSpan = 5;
                 td.className = 'text-center';
                 td.style.color = '#94A3B8';
                 td.textContent = 'Sin calificaciones registradas';
@@ -493,13 +505,23 @@ def obtener_estudiante(cedula: str):
 
         promedio, inasistencias, estado, motivo = evaluar_condicion_academica(alumno.cedula)
 
-        notas_data = []
+        notas_por_materia = {}
         for n in (alumno.notas or []):
             materia_nom = n.materia.nombre if n.materia else "Materia Desconocida"
+            if materia_nom not in notas_por_materia:
+                notas_por_materia[materia_nom] = {1: None, 2: None, 3: None}
+            notas_por_materia[materia_nom][n.lapso] = n.calificacion
+            
+        notas_data = []
+        for mat, lapsos in notas_por_materia.items():
+            valid_notes = [v for v in lapsos.values() if v is not None]
+            final = sum(valid_notes) / len(valid_notes) if valid_notes else None
             notas_data.append({
-                "materia": materia_nom,
-                "lapso": n.lapso,
-                "calificacion": n.calificacion
+                "materia": mat,
+                "l1": lapsos[1],
+                "l2": lapsos[2],
+                "l3": lapsos[3],
+                "final": final
             })
 
         rep_nombre = f"{alumno.representante.nombre} {alumno.representante.apellido}" if alumno.representante else None
