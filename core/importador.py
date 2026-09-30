@@ -1,6 +1,6 @@
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
-from database.models import SessionLocal, Alumno, Representante, Direccion
+from database.models import SessionLocal, Alumno, Representante, Direccion, Materia, Nota
 
 def registrar_alumno_manual(
     cedula_alumno: str,
@@ -63,6 +63,19 @@ def registrar_alumno_manual(
             id_representante=rep.cedula
         )
         db.add(nuevo_alumno)
+        db.flush()
+
+        # Generar notas vacías (0.0) para que puedan ser editadas
+        materias_del_anio = db.query(Materia).filter(Materia.grado == nuevo_alumno.anio).all()
+        for mat in materias_del_anio:
+            for lapso in [1, 2, 3]:
+                db.add(Nota(
+                    cedula_alumno=nuevo_alumno.cedula,
+                    id_materia=mat.id_materia,
+                    calificacion=0.0,
+                    lapso=lapso
+                ))
+
         db.commit()
         return True, f"Alumno {nombre_alumno} {apellido_alumno} ({anio} - Sec. {seccion}) registrado con éxito."
     except Exception as e:
