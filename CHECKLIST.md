@@ -5,8 +5,8 @@ Documento de seguimiento de requerimientos, mejoras de backend y funcionalidades
 ---
 
 ## 1. Gestión Académica y Materias
-- [ ] **Catálogo y Pensum por Grado:** Definición formal de las materias que corresponden a cada año escolar (1er a 5to Año).
-- [ ] **Asignación Automática de Materias:** Al inscribir o importar un estudiante en un año escolar, generar automáticamente sus materias y registros de notas pendientes.
+- [x] **Catálogo y Pensum por Grado:** Definición formal de las materias que corresponden a cada año escolar (1er a 5to Año).
+- [x] **Asignación Automática de Materias:** Al inscribir o importar un estudiante en un año escolar, generar automáticamente sus materias y registros de notas pendientes.
 - [ ] **Carga de Calificaciones por Planilla:** Vista para seleccionar (Año + Sección + Materia + Lapso) e ingresar notas de todos los alumnos simultáneamente.
 - [ ] **Asignación de Profesores:** Vincular docentes a asignaturas y secciones específicas.
 
